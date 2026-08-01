@@ -120,6 +120,34 @@
     fetch('/api/config').then(r => r.json()).then(cfg => {
       window.APP_CONFIG = cfg;
     }).catch(e => console.warn('加载配置失败:', e));
+
+    // 飞书 OAuth 登录检查
+    (function checkAuth() {
+      const token = sessionStorage.getItem('auth_token');
+      const openId = sessionStorage.getItem('auth_openid');
+      if (!token || !openId) {
+        // 未登录 → 跳飞书授权
+        location.href = '/auth.html';
+        return;
+      }
+      // 验证 session 有效 + 检查审批状态
+      fetch('/api/auth/status?openId=' + encodeURIComponent(openId))
+        .then(r => r.json())
+        .then(d => {
+          if (!d.approved) {
+            location.href = '/denied.html';
+            return;
+          }
+          // 已通过 → 标记已认证，跳过手动输入
+          window._oauthAuthed = true;
+          document.getElementById('auth-status').className = 'step-status done';
+          document.getElementById('auth-status').textContent = '已认证（飞书登录）';
+          document.getElementById('config-panel').style.display = 'block';
+        })
+        .catch(() => {
+          location.href = '/auth.html';
+        });
+    })();
   </script>
   <script src="lib/config.js"></script>
   <script src="lib/knowledge-base.js"></script>

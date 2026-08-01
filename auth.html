@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>登录中...</title>
+  <style>
+    body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #FDF5EE; color: #5C4033; }
+    .box { text-align: center; }
+    .spinner { width: 36px; height: 36px; border: 3px solid #E8C8A8; border-top-color: #D4A574; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .error { color: #C97C7C; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div class="spinner" id="spinner"></div>
+    <p id="msg">正在通过飞书登录...</p>
+  </div>
+  <script>
+    (async () => {
+      const params = new URLSearchParams(location.search);
+      const code = params.get('code');
+      const appId = (window.APP_CONFIG && window.APP_CONFIG.app_id) || '';
+
+      if (!code) {
+        // 没有 code → 跳飞书授权页
+        if (!appId) {
+          // 先加载 config
+          try {
+            const r = await fetch('/api/config');
+            const cfg = await r.json();
+            window.APP_CONFIG = cfg;
+          } catch (e) { /* ignore */ }
+        }
+        const aid = window.APP_CONFIG?.app_id || '';
+        if (!aid) {
+          document.getElementById('msg').textContent = '应用配置未加载，请刷新重试';
+          document.getElementById('msg').className = 'error';
+          document.getElementById('spinner').style.display = 'none';
+          return;
+        }
+        location.href = 'https://open.feishu.cn/open-apis/authen/v1/authorize?app_id=' + aid + '&redirect_uri=' + encodeURIComponent(location.origin + '/auth.html');
+        return;
+      }
+
+      // 有 code → 换 session token
+      try {
+        const r = await fetch('/api/auth/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code })
+        });
+        const d = await r.json();
+
+        if (d.approved) {
+          sessionStorage.setItem('auth_token', d.token);
+          sessionStorage.setItem('auth_user', d.userName);
+          sessionStorage.setItem('auth_openid', d.openId);
+          location.href = '/';
+        } else {
+          // 未审批 → 去申请页
+          sessionStorage.setItem('auth_openid', d.openId);
+          sessionStorage.setItem('auth_user', d.userName);
+          location.href = '/denied.html';
+        }
+      } catch (e) {
+        document.getElementById('msg').textContent = '登录失败: ' + e.message;
+        document.getElementById('msg').className = 'error';
+        document.getElementById('spinner').style.display = 'none';
+      }
+    })();
+  </script>
+</body>
+</html>

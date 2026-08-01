@@ -120,6 +120,23 @@ async function handleAuth() {
   const baseUrl = document.getElementById('baseUrl').value.trim();
   if (!baseUrl) { alert('请输入飞书链接'); return; }
 
+  // OAuth 登录 → 从服务端获取 token
+  if (window._oauthAuthed && !getToken()) {
+    showLoading('正在获取 Token...');
+    try {
+      await initOAuthToken();
+      document.getElementById('auth-status').className = 'step-status done';
+      document.getElementById('auth-status').textContent = '已认证（飞书登录）';
+      document.getElementById('config-panel').style.display = 'block';
+      addHistory(baseUrl);
+    } catch (e) {
+      alert('Token 获取失败: ' + e.message);
+    } finally {
+      hideLoading();
+    }
+    return;
+  }
+
   const manualToken = document.getElementById('manualToken').value.trim();
   if (manualToken) {
     setToken(manualToken);

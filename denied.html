@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>等待审批</title>
+  <style>
+    body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #FDF5EE; color: #5C4033; }
+    .box { text-align: center; max-width: 400px; padding: 32px; }
+    h2 { margin-bottom: 8px; }
+    p { font-size: 14px; color: #8B7355; }
+    .btn { margin-top: 20px; padding: 10px 28px; background: #D4A574; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; }
+    .btn:hover { background: #C49464; }
+    .btn:disabled { background: #ccc; cursor: not-allowed; }
+    .note { font-size: 12px; color: #86909c; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h2>等待审批</h2>
+    <p>你好 <strong id="uname">...</strong></p>
+    <p>请联系管理员审批通过后使用。</p>
+    <button class="btn" id="btn-apply" onclick="handleApply()">申请访问权限</button>
+    <p class="note" id="poll-note"></p>
+  </div>
+  <script>
+    const openId = sessionStorage.getItem('auth_openid');
+    const userName = sessionStorage.getItem('auth_user');
+    document.getElementById('uname').textContent = userName || openId || '未知用户';
+
+    let pollTimer = null;
+
+    function handleApply() {
+      const btn = document.getElementById('btn-apply');
+      btn.disabled = true;
+      btn.textContent = '已提交申请';
+      document.getElementById('poll-note').textContent = '正在等待管理员审批，审批通过后将自动跳转...';
+      // 开始轮询
+      pollTimer = setInterval(checkStatus, 5000);
+      checkStatus();
+    }
+
+    async function checkStatus() {
+      try {
+        const r = await fetch('/api/auth/status?openId=' + encodeURIComponent(openId));
+        const d = await r.json();
+        if (d.approved) {
+          if (pollTimer) clearInterval(pollTimer);
+          sessionStorage.setItem('auth_user', userName);
+          sessionStorage.setItem('auth_openid', openId);
+          location.href = '/';
+        }
+      } catch (e) { /* ignore */ }
+    }
+  </script>
+</body>
+</html>
