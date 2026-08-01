@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>登录中...</title></head>
+<body>
+<script>
+(async function(){
+  var p=new URLSearchParams(location.search), code=p.get('code');
+  if(!code){
+    location.href='https://open.feishu.cn/open-apis/authen/v1/authorize?app_id=cli_aae72d734df8dcbb&redirect_uri='+encodeURIComponent(location.origin+'/auth.html');
+    return;
+  }
+  try{
+    var r=await fetch('/api/auth/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:code})});
+    var d=await r.json();
+    if(!d.ok||!d.token){throw new Error(d.error||'验证失败');}
+    sessionStorage.setItem('auth_token',d.token);
+    sessionStorage.setItem('auth_user',d.userName||'');
+    sessionStorage.setItem('auth_openid',d.openId||'');
+    if(d.pending){
+      location.href='/denied.html?user='+encodeURIComponent(d.userName||'')+'&openId='+encodeURIComponent(d.openId||'')+'&dept='+encodeURIComponent(d.department||'');
+      return;
+    }
+    var redirect=sessionStorage.getItem('login_redirect')||'/';
+    sessionStorage.removeItem('login_redirect');
+    location.href=redirect;
+  }catch(e){
+    document.body.innerHTML='<div style="text-align:center;padding:60px;font-family:sans-serif;"><h2>'+e.message+'</h2><a href="/auth.html">重试</a></div>';
+  }
+})();
+</script>
+</body></html>

@@ -2,194 +2,341 @@ const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
-const url = require('url');
 
 const ROOT = __dirname;
 
-// 读取 config.json
+// ── 配置 ──
 let CONFIG = {};
 try {
   CONFIG = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf-8'));
-  console.log('config.json loaded');
-} catch (e) {
-  console.warn('config.json not found, using defaults:', e.message);
-}
+} catch (e) { console.warn('config.json not found'); }
 
+const APP_ID = CONFIG.app_id || '';
+const APP_SECRET = CONFIG.app_secret || '';
 const PORT = CONFIG.port || 8080;
+const APP_URL = `http://192.168.101.13:${PORT}`;
 
-// ── OAuth 基础设施 ──
-
-// 权限存储
-const APPROVED_PATH = path.join(ROOT, 'approved.json');
-let approved = {};
-try { approved = JSON.parse(fs.readFileSync(APPROVED_PATH, 'utf-8')); } catch (e) { console.log('approved.json 不存在，初始化空列表'); }
-
-function saveApproved() {
-  fs.writeFileSync(APPROVED_PATH, JSON.stringify(approved, null, 2));
-}
-
-// 会话（内存，重启失效）
-const sessions = new Map();       // sessionToken → { openId, userName, expires }
-const pendingRequests = new Map(); // openId → { userName, department, requestedAt }
-
-// app_access_token 缓存
-let appAccessToken = null;
-let appAccessTokenExpiry = 0;
-
-async function getAppAccessToken() {
-  if (appAccessToken && Date.now() < appAccessTokenExpiry) return appAccessToken;
-  const result = await proxyRequest(
-    '/open-apis/auth/v3/app_access_token/internal',
-    'POST',
-    {},
-    JSON.stringify({ app_id: CONFIG.app_id, app_secret: CONFIG.app_secret })
-  );
-  const data = JSON.parse(result);
-  if (data.code !== 0) throw new Error('获取 app_access_token 失败: ' + (data.msg || ''));
-  appAccessToken = data.app_access_token;
-  appAccessTokenExpiry = Date.now() + (data.expire - 300) * 1000;
-  return appAccessToken;
-}
-
-// 应用所有者缓存（10 分钟）
-let ownerCache = null;
-let ownerCacheTime = 0;
-
-async function getAppOwnerId() {
-  if (ownerCache && Date.now() - ownerCacheTime < 600000) return ownerCache;
-  try {
-    // 需要 app_access_token，内部 API 会通过 Authorization header
-    const token = await getAppAccessToken();
-    const result = await proxyWithRetry(
-      `/open-apis/application/v6/applications/${CONFIG.app_id}/collaborators`,
-      'GET',
-      { 'Authorization': `Bearer ${token}` },
-      null
-    );
-    const data = JSON.parse(result);
-    const owners = (data.data?.collaborators || []).filter(c => c.type === 'owner');
-    ownerCache = owners.map(o => o.user_id);
-    ownerCacheTime = Date.now();
-    return ownerCache;
-  } catch (e) {
-    console.warn('getAppOwnerId 失败:', e.message);
-    return ownerCache || [];
-  }
-}
-
-function isAppOwner(openId) {
-  return ownerCache && ownerCache.includes(openId);
-}
-
-// 生成 session token
-function generateToken() {
-  return 'st_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
-}
-
-const MIME_TYPES = {
-  '.html': 'text/html; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.js': 'application/javascript; charset=utf-8',
-  '.json': 'application/json',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.svg': 'image/svg+xml'
+const CT_JSON = { 'Content-Type': 'application/json; charset=utf-8' };
+const CT_HTML = { 'Content-Type': 'text/html; charset=utf-8' };
+const MIME = {
+  '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8', '.json': 'application/json',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml'
 };
 
-// 代理飞书 API 请求
-function proxyRequest(feishuPath, method, headers, body) {
+// ── 权限存储 ──
+const APPROVED_PATH = path.join(ROOT, 'approved.json');
+function loadApproved() { try { return JSON.parse(fs.readFileSync(APPROVED_PATH, 'utf-8')); } catch { return {}; } }
+function saveApproved(data) { fs.writeFileSync(APPROVED_PATH, JSON.stringify(data, null, 2)); }
+function isApproved(openId) { const a = loadApproved(); return !!(a[openId]); }
+function approveUser(openId, userName, department) {
+  const a = loadApproved();
+  a[openId] = { userName, department: department || '', approvedAt: new Date().toISOString() };
+  saveApproved(a);
+}
+
+const sessions = new Map();
+const pendingRequests = new Map();
+
+// ── 工具 ──
+function parseBody(req) {
+  return new Promise(resolve => {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', () => { try { resolve(JSON.parse(body || '{}')); } catch { resolve({}); } });
+  });
+}
+function sendJSON(res, code, data) {
+  res.writeHead(code, { ...CT_JSON, 'Access-Control-Allow-Origin': '*' });
+  res.end(JSON.stringify(data));
+}
+
+// ── 飞书 API ──
+function feishuReq(method, feishuPath, data, token) {
   return new Promise((resolve, reject) => {
-    const options = {
-      hostname: 'open.feishu.cn',
-      port: 443,
-      path: feishuPath,
-      method: method,
-      headers: { 'Content-Type': 'application/json; charset=utf-8', ...headers }
+    const opts = {
+      hostname: 'open.feishu.cn', port: 443, path: feishuPath, method,
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+      }
     };
-    const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => resolve(data));
+    const r = https.request(opts, res => {
+      let body = '';
+      res.on('data', c => body += c);
+      res.on('end', () => { try { resolve(JSON.parse(body)); } catch { resolve({ raw: body }); } });
     });
-    req.on('error', reject);
-    if (body) req.write(body);
-    req.end();
+    r.on('error', reject);
+    if (data) r.write(JSON.stringify(data));
+    r.end();
   });
 }
 
-// 重试包装：关键 API 调用失败后重试 3 次，间隔 2 秒
+// app_access_token 缓存
+let appToken = null, appTokenExpiry = 0;
+async function getAppToken() {
+  if (appToken && Date.now() < appTokenExpiry) return appToken;
+  const d = await feishuReq('POST', '/open-apis/auth/v3/app_access_token/internal',
+    { app_id: APP_ID, app_secret: APP_SECRET });
+  if (d.code !== 0 || !d.app_access_token) throw new Error('app token failed');
+  appToken = d.app_access_token;
+  appTokenExpiry = Date.now() + (d.expire - 300) * 1000;
+  return appToken;
+}
+
+// tenant_access_token 缓存
+let tenantToken = null, tenantTokenExpiry = 0;
+async function getTenantToken() {
+  if (tenantToken && Date.now() < tenantTokenExpiry) return tenantToken;
+  const d = await feishuReq('POST', '/open-apis/auth/v3/tenant_access_token/internal',
+    { app_id: APP_ID, app_secret: APP_SECRET });
+  if (d.code !== 0) throw new Error('tenant token failed');
+  tenantToken = d.tenant_access_token;
+  tenantTokenExpiry = Date.now() + (d.expire - 300) * 1000;
+  return tenantToken;
+}
+
+// 应用所有者（缓存 10 分钟）
+let ownerCache = null, ownerCacheTime = 0;
+async function getAppOwnerId() {
+  if (ownerCache && Date.now() - ownerCacheTime < 600000) return ownerCache;
+  try {
+    const t = await getAppToken();
+    const d = await feishuReq('GET',
+      `/open-apis/application/v6/applications/${APP_ID}/collaborators`, null, t);
+    const owners = (d.data?.collaborators || []).filter(c => c.type === 'owner');
+    ownerCache = owners.length > 0 ? owners[0].user_id : '';
+    ownerCacheTime = Date.now();
+    return ownerCache;
+  } catch (e) { console.warn('getAppOwnerId failed:', e.message); return ownerCache || ''; }
+}
+
+// 部门查询
+async function getDepartment(openId) {
+  try {
+    const t = await getTenantToken();
+    const d = await feishuReq('GET',
+      `/open-apis/contact/v3/users/${openId}?department_id_type=open_department_id`, null, t);
+    if (d.code === 0 && d.data?.user?.department_ids?.length > 0) {
+      return d.data.user.department_ids.join(',');
+    }
+  } catch (e) { /* ignore */ }
+  return '';
+}
+
+// ── 机器人发消息 ──
+async function sendBotMsg(openId, title, content, url, color) {
+  try {
+    const t = await getTenantToken();
+    const parts = content.split('\n');
+    const divs = parts.map(p => '{"tag":"div","text":{"tag":"lark_md","content":"' + p.replace(/"/g, '\\"') + '"}}').join(',');
+    const elements = [divs];
+    if (url) {
+      elements.push('{"tag":"action","actions":[{"tag":"button","text":{"tag":"plain_text","content":"进入应用"},"type":"primary","multi_url":{"url":"' + url + '"}}]}');
+    }
+    const card = '{"header":{"title":{"tag":"plain_text","content":"' + title + '"},"template":"' + (color || 'blue') + '"},"elements":[' + elements.join(',') + ']}';
+    await feishuReq('POST', '/open-apis/im/v1/messages?receive_id_type=open_id',
+      { receive_id: openId, msg_type: 'interactive', content: card }, t);
+  } catch (e) { console.error('sendBotMsg failed:', e.message); }
+}
+
+async function sendApproveCard(userName, openId, department) {
+  try {
+    const owner = await getAppOwnerId();
+    if (!owner) return;
+    const content = '用户：' + userName + '\n' + (department ? '部门：' + department + '\n' : '') + '申请访问米萌标题智能运营';
+    const parts = content.split('\n');
+    const divs = parts.map(p => '{"tag":"div","text":{"tag":"lark_md","content":"' + p.replace(/"/g, '\\"') + '"}}').join(',');
+    const approveUrl = APP_URL + '/api/approve?openId=' + openId + '&userName=' + encodeURIComponent(userName) + '&action=approve';
+    const rejectUrl = APP_URL + '/api/approve?openId=' + openId + '&userName=' + encodeURIComponent(userName) + '&action=reject';
+    const card = '{"header":{"title":{"tag":"plain_text","content":"权限申请"},"template":"blue"},"elements":[' + divs +
+      ',{"tag":"action","actions":[{"tag":"button","text":{"tag":"plain_text","content":"通过"},"type":"primary","multi_url":{"url":"' + approveUrl + '"}},{"tag":"button","text":{"tag":"plain_text","content":"拒绝"},"type":"danger","multi_url":{"url":"' + rejectUrl + '"}}]}]}';
+    await feishuReq('POST', '/open-apis/im/v1/messages?receive_id_type=open_id',
+      { receive_id: owner, msg_type: 'interactive', content: card }, await getTenantToken());
+  } catch (e) { console.error('sendApproveCard failed:', e.message); }
+}
+
+// ── 重试 API（供 /api/proxy 使用） ──
+function proxyRequest(feishuPath, method, headers, body) {
+  return new Promise((resolve, reject) => {
+    const opts = {
+      hostname: 'open.feishu.cn', port: 443, path: feishuPath, method,
+      headers: { 'Content-Type': 'application/json; charset=utf-8', ...headers }
+    };
+    const r = https.request(opts, res => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => resolve(data));
+    });
+    r.on('error', reject);
+    if (body) r.write(body);
+    r.end();
+  });
+}
+
 async function proxyWithRetry(feishuPath, method, headers, body, retries = 3) {
   for (let i = 0; i < retries; i++) {
-    try {
-      return await proxyRequest(feishuPath, method, headers, body);
-    } catch (e) {
-      if (i === retries - 1) throw e;
-      console.warn(`API retry ${i + 1}/${retries - 1}: ${feishuPath} (${e.message})`);
-      await new Promise(r => setTimeout(r, 2000));
-    }
+    try { return await proxyRequest(feishuPath, method, headers, body); }
+    catch (e) { if (i === retries - 1) throw e; await new Promise(r => setTimeout(r, 2000)); }
   }
 }
 
-const server = http.createServer(async (req, res) => {
-  const parsedUrl = url.parse(req.url, true);
+// ── Router ──
+const router = {
 
-  // API 代理
-  if (parsedUrl.pathname.startsWith('/api/proxy')) {
-    const target = parsedUrl.query.target;
-    if (!target) { res.writeHead(400); res.end('Missing target'); return; }
-
-    let body = '';
-    req.on('data', chunk => body += chunk);
-    req.on('end', async () => {
-      try {
-        const authHeader = req.headers['x-feishu-token'] ? { 'Authorization': `Bearer ${req.headers['x-feishu-token']}` } : {};
-        const result = await proxyWithRetry(decodeURIComponent(target), req.method, authHeader, body || null);
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
-        res.end(result);
-      } catch (e) {
-        res.writeHead(500);
-        res.end(JSON.stringify({ error: e.message }));
-      }
-    });
-    return;
-  }
-
-  // 调试：查看原始记录
-  if (parsedUrl.pathname === '/api/debug-records') {
-    let body = '';
-    req.on('data', chunk => body += chunk);
-    req.on('end', async () => {
-      try {
-        const { baseToken, tableId, token } = JSON.parse(body || '{}');
-        const authHeader = token ? { 'Authorization': `Bearer ${token}` } : {};
-        const result = await proxyWithRetry(`/open-apis/bitable/v1/apps/${baseToken}/tables/${tableId}/records?page_size=3`, 'GET', authHeader);
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
-        res.end(result);
-      } catch (e) {
-        res.writeHead(500);
-        res.end(JSON.stringify({ error: e.message }));
-      }
-    });
-    return;
-  }
-
-  // 服务端飞书 Token（OAuth 登录后前端通过此接口拿 token，不用手动输 App Secret）
-  if (parsedUrl.pathname === '/api/feishu-token') {
+  // ── OAuth 验证 ──
+  'POST /api/auth/verify': async (req, res) => {
     try {
-      const result = await proxyRequest(
-        '/open-apis/auth/v3/tenant_access_token/internal',
-        'POST',
-        {},
-        JSON.stringify({ app_id: CONFIG.app_id, app_secret: CONFIG.app_secret })
-      );
-      const data = JSON.parse(result);
-      if (data.code !== 0) {
-        res.writeHead(500);
-        res.end(JSON.stringify({ error: '获取 token 失败: ' + data.msg }));
-        return;
-      }
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
-      res.end(JSON.stringify({ token: data.tenant_access_token }));
+      const body = await parseBody(req);
+      if (!body.code) { sendJSON(res, 400, { ok: false, error: '缺少 code' }); return; }
+      // 1. app_access_token
+      const appToken = await getAppToken();
+      // 2. code 换 user token
+      const uData = await feishuReq('POST', '/open-apis/authen/v1/access_token',
+        { grant_type: 'authorization_code', code: body.code }, appToken);
+      if (uData.code !== 0 || !uData.data) throw new Error(uData.msg || 'code 无效');
+      // 3. 拿用户信息
+      const iData = await feishuReq('GET', '/open-apis/authen/v1/user_info', null, uData.data.access_token);
+      if (iData.code !== 0 || !iData.data) throw new Error('用户信息获取失败');
+      const openId = iData.data.open_id;
+      const userName = iData.data.name;
+      // 4. 获取部门
+      let department = '';
+      try { department = await getDepartment(openId); } catch (e) { /* ignore */ }
+      // 5. 创建 session（应用所有者自动通过）
+      const appOwner = await getAppOwnerId();
+      const isOwner = (openId === appOwner);
+      const approved = isOwner || isApproved(openId);
+      if (isOwner && !isApproved(openId)) { approveUser(openId, userName, department); }
+      const crypto = require('crypto');
+      const token = crypto.randomBytes(24).toString('hex');
+      sessions.set(token, { openId, userName, department, approved, createdAt: Date.now() });
+      sendJSON(res, 200, { ok: true, token, userName, department, pending: !approved, openId });
+    } catch (e) { sendJSON(res, 500, { ok: false, error: e.message }); }
+  },
+
+  // ── 权限申请 ──
+  'POST /api/auth/request': async (req, res) => {
+    try {
+      const body = await parseBody(req);
+      const { openId, userName } = body;
+      if (!openId || !userName) { sendJSON(res, 400, { ok: false, error: '参数不全' }); return; }
+      if (isApproved(openId)) { sendJSON(res, 200, { ok: true, message: '你的权限已审批通过，请刷新页面' }); return; }
+      pendingRequests.set(openId, { userName, department: body.department || '', requestedAt: new Date().toISOString() });
+      sendApproveCard(userName, openId, body.department || '');
+      sendJSON(res, 200, { ok: true, message: '已提交申请，等待管理员审批' });
+    } catch (e) { sendJSON(res, 500, { ok: false, error: e.message }); }
+  },
+
+  // ── 审批状态 ──
+  'GET /api/auth/status': async (req, res) => {
+    const parsed = new URL(req.url, 'http://localhost');
+    const openId = parsed.searchParams.get('openId');
+    if (!openId) { sendJSON(res, 400, { approved: false }); return; }
+    sendJSON(res, 200, { approved: isApproved(openId) });
+  },
+
+  // ── 审批操作（卡片按钮回调） ──
+  'GET /api/approve': async (req, res) => {
+    const parsed = new URL(req.url, 'http://localhost');
+    const openId = parsed.searchParams.get('openId');
+    const userName = parsed.searchParams.get('userName');
+    const action = parsed.searchParams.get('action');
+    if (!openId || !action) { res.writeHead(400, CT_HTML); res.end('<h2>参数错误</h2>'); return; }
+    const isApprove = action === 'approve';
+    const reqInfo = pendingRequests.get(openId);
+    pendingRequests.delete(openId);
+    if (isApprove) {
+      approveUser(openId, userName, reqInfo?.department || '');
+      sendBotMsg(openId, '审批通过', (reqInfo?.department ? '部门：' + reqInfo.department + '\n' : '') + '你的访问权限已通过，现在可以正常使用了。', APP_URL, 'green');
+    } else {
+      sendBotMsg(openId, '审批未通过', (reqInfo?.department ? '部门：' + reqInfo.department + '\n' : '') + '你的访问申请未通过，如有疑问请联系管理员。', '', 'red');
+    }
+    const color = isApprove ? '#2e7d32' : '#c62828';
+    const bg = isApprove ? '#f0f8f0' : '#fff5f5';
+    const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="text-align:center;padding:60px 20px;font-family:sans-serif;background:' + bg + '"><p style="font-size:18px;color:' + color + '">' + (isApprove ? '已通过 ' : '已拒绝 ') + (userName || '') + '</p><script>setTimeout(function(){location.href="/admin.html"},800)</script></body></html>';
+    res.writeHead(200, CT_HTML);
+    res.end(html);
+  },
+
+  // ── 审批执行（管理页调用） ──
+  'POST /api/approve': async (req, res) => {
+    const body = await parseBody(req);
+    const { openId, userName, action } = body;
+    if (!openId || !action) { sendJSON(res, 400, { ok: false }); return; }
+    const isApprove = action === 'approve';
+    const reqInfo = pendingRequests.get(openId);
+    pendingRequests.delete(openId);
+    if (isApprove) {
+      approveUser(openId, userName, reqInfo?.department || '');
+      sendBotMsg(openId, '审批通过', (reqInfo?.department ? '部门：' + reqInfo.department + '\n' : '') + '你的访问权限已通过，现在可以正常使用了。', APP_URL, 'green');
+    } else {
+      sendBotMsg(openId, '审批未通过', (reqInfo?.department ? '部门：' + reqInfo.department + '\n' : '') + '你的访问申请未通过，如有疑问请联系管理员。', '', 'red');
+    }
+    sendJSON(res, 200, { ok: true });
+  },
+
+  // ── 权限管理（仅所有者） ──
+  'GET /api/admin/users': async (req, res) => {
+    const tok = req.headers['x-auth-token'] || '';
+    const session = sessions.get(tok);
+    if (!session || session.openId !== await getAppOwnerId()) { sendJSON(res, 403, { ok: false, error: '仅应用所有者可操作' }); return; }
+    const pending = [];
+    pendingRequests.forEach((v, k) => { pending.push({ openId: k, ...v }); });
+    sendJSON(res, 200, { ok: true, users: loadApproved(), pending });
+  },
+
+  // ── 撤销权限 ──
+  'POST /api/admin/revoke': async (req, res) => {
+    try {
+      const tok = req.headers['x-auth-token'] || '';
+      const session = sessions.get(tok);
+      if (!session || session.openId !== await getAppOwnerId()) { sendJSON(res, 403, { ok: false, error: '仅应用所有者可操作' }); return; }
+      const body = await parseBody(req);
+      if (!body.openId) { sendJSON(res, 400, { ok: false }); return; }
+      const a = loadApproved();
+      if (a[body.openId]?.isOwner) { sendJSON(res, 400, { ok: false, error: '不能撤销应用所有者' }); return; }
+      delete a[body.openId];
+      saveApproved(a);
+      sendJSON(res, 200, { ok: true });
+    } catch (e) { sendJSON(res, 500, { ok: false, error: e.message }); }
+  },
+
+  // ── 服务端飞书 Token（供前端 API 调用） ──
+  'GET /api/feishu-token': async (req, res) => {
+    try {
+      const token = await getTenantToken();
+      sendJSON(res, 200, { token });
+    } catch (e) { sendJSON(res, 500, { error: e.message }); }
+  },
+
+  // ── 前端配置 ──
+  'GET /api/config': async (req, res) => {
+    sendJSON(res, 200, {
+      app_id: APP_ID,
+      llm_model: CONFIG.llm_model || ''
+    });
+  }
+};
+
+// ── HTTP Server ──
+http.createServer(async (req, res) => {
+  const parsed = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  const k = `${req.method} ${parsed.pathname}`;
+
+  // Router
+  if (router[k]) { await router[k](req, res); return; }
+
+  // /api/proxy
+  if (parsed.pathname.startsWith('/api/proxy')) {
+    const target = parsed.searchParams.get('target');
+    if (!target) { res.writeHead(400); res.end('Missing target'); return; }
+    try {
+      const body = await parseBody(req);
+      const authHeader = req.headers['x-feishu-token'] ? { 'Authorization': `Bearer ${req.headers['x-feishu-token']}` } : {};
+      const result = await proxyWithRetry(decodeURIComponent(target), req.method, authHeader, body.body ? JSON.stringify(body.body) : null);
+      res.writeHead(200, { ...CT_JSON, 'Access-Control-Allow-Origin': '*' });
+      res.end(result);
     } catch (e) {
       res.writeHead(500);
       res.end(JSON.stringify({ error: e.message }));
@@ -197,272 +344,56 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // 前端配置接口（不泄露 API key）
-  if (parsedUrl.pathname === '/api/config') {
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
-    res.end(JSON.stringify({
-      app_id: CONFIG.app_id || '',
-      llm_model: CONFIG.llm_model || ''
-    }));
-    return;
-  }
-
-  // LLM API 代理
-  if (parsedUrl.pathname === '/api/llm') {
-    let body = '';
-    req.on('data', chunk => body += chunk);
-    req.on('end', async () => {
-      try {
-        if (!CONFIG.llm_endpoint || !CONFIG.llm_api_key) {
-          res.writeHead(500);
-          res.end(JSON.stringify({ error: { message: 'LLM 未配置，请检查 config.json' } }));
-          return;
-        }
-        const { model, temperature, maxTokens, messages } = JSON.parse(body || '{}');
-        const llmBody = JSON.stringify({ model, messages, temperature, max_tokens: maxTokens });
-        const llmUrl = new URL(CONFIG.llm_endpoint);
-        const options = {
-          hostname: llmUrl.hostname,
-          port: llmUrl.port || 443,
-          path: llmUrl.pathname,
-          method: 'POST',
+  // /api/llm
+  if (parsed.pathname === '/api/llm') {
+    try {
+      const body = await parseBody(req);
+      if (!CONFIG.llm_endpoint || !CONFIG.llm_api_key) {
+        res.writeHead(500); res.end(JSON.stringify({ error: { message: 'LLM 未配置' } })); return;
+      }
+      const llmUrl = new URL(CONFIG.llm_endpoint);
+      const result = await new Promise((resolve, reject) => {
+        const r = https.request({
+          hostname: llmUrl.hostname, port: llmUrl.port || 443, path: llmUrl.pathname, method: 'POST',
           headers: {
-            'Content-Type': 'application/json; charset=utf-8',
+            'Content-Type': 'application/json',
             'Authorization': `Bearer ${CONFIG.llm_api_key}`
           }
-        };
-        const result = await new Promise((resolve, reject) => {
-          const req2 = https.request(options, res2 => {
-            let data = '';
-            res2.on('data', chunk => data += chunk);
-            res2.on('end', () => resolve(data));
-          });
-          req2.on('error', reject);
-          req2.write(llmBody);
-          req2.end();
-        });
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
-        res.end(result);
-      } catch (e) {
-        res.writeHead(500);
-        res.end(JSON.stringify({ error: { message: e.message } }));
-      }
-    });
-    return;
-  }
-
-  // ── OAuth 认证接口 ──
-
-  // OAuth 回调：code 换 session token
-  if (parsedUrl.pathname === '/api/auth/verify') {
-    let body = '';
-    req.on('data', chunk => body += chunk);
-    req.on('end', async () => {
-      try {
-        const { code } = JSON.parse(body || '{}');
-        if (!code) { res.writeHead(400); res.end(JSON.stringify({ error: '缺少 code' })); return; }
-
-        // 1. 拿 app_access_token
-        const appToken = await getAppAccessToken();
-
-        // 2. code 换 user_access_token
-        const tokenRes = JSON.parse(await proxyRequest(
-          '/open-apis/authen/v1/access_token',
-          'POST',
-          { 'Authorization': `Bearer ${appToken}` },
-          JSON.stringify({ grant_type: 'authorization_code', code })
-        ));
-        if (tokenRes.code !== 0) {
-          res.writeHead(401);
-          res.end(JSON.stringify({ error: 'token 交换失败: ' + tokenRes.msg }));
-          return;
-        }
-
-        // 3. 拿用户信息
-        const userRes = JSON.parse(await proxyRequest(
-          '/open-apis/authen/v1/user_info',
-          'GET',
-          { 'Authorization': `Bearer ${tokenRes.data.access_token}` }
-        ));
-        if (userRes.code !== 0) {
-          res.writeHead(401);
-          res.end(JSON.stringify({ error: '获取用户信息失败: ' + userRes.msg }));
-          return;
-        }
-        const openId = userRes.data.open_id;
-        const userName = userRes.data.name || openId;
-
-        // 4. 检查权限：应用所有者 or 在 approved.json 中
-        const owners = await getAppOwnerId();
-        const isOwner = owners.includes(openId);
-        if (isOwner) {
-          // 应用所有者自动通过
-          const sessionToken = generateToken();
-          sessions.set(sessionToken, { openId, userName, expires: Date.now() + 86400000 });
-          approved[openId] = { userName, approvedAt: new Date().toISOString(), isOwner: true };
-          saveApproved();
-          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ token: sessionToken, userName, openId, approved: true }));
-          return;
-        }
-
-        if (approved[openId]) {
-          const sessionToken = generateToken();
-          sessions.set(sessionToken, { openId, userName, expires: Date.now() + 86400000 });
-          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ token: sessionToken, userName, openId, approved: true }));
-          return;
-        }
-
-        // 不在白名单 — 需要申请
-        pendingRequests.set(openId, { userName, requestedAt: new Date().toISOString() });
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ approved: false, openId, userName, message: '需要管理员审批' }));
-
-      } catch (e) {
-        res.writeHead(500);
-        res.end(JSON.stringify({ error: e.message }));
-      }
-    });
-    return;
-  }
-
-  // 检查审批状态
-  if (parsedUrl.pathname === '/api/auth/status') {
-    const openId = parsedUrl.query.openId;
-    if (!openId) { res.writeHead(400); res.end(JSON.stringify({ error: '缺少 openId' })); return; }
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
-    res.end(JSON.stringify({ approved: !!approved[openId] }));
-    return;
-  }
-
-  // 获取当前用户（从 session token）
-  if (parsedUrl.pathname === '/api/auth/user') {
-    const token = req.headers['x-auth-token'];
-    if (!token || !sessions.has(token)) {
-      res.writeHead(401);
-      res.end(JSON.stringify({ error: '未登录' }));
-      return;
+        }, res2 => { let d = ''; res2.on('data', c => d += c); res2.on('end', () => resolve(d)); });
+        r.on('error', reject);
+        r.write(JSON.stringify({ model: body.model, messages: body.messages, temperature: body.temperature, max_tokens: body.maxTokens }));
+        r.end();
+      });
+      res.writeHead(200, { ...CT_JSON, 'Access-Control-Allow-Origin': '*' });
+      res.end(result);
+    } catch (e) {
+      res.writeHead(500);
+      res.end(JSON.stringify({ error: { message: e.message } }));
     }
-    const session = sessions.get(token);
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
-    res.end(JSON.stringify({ openId: session.openId, userName: session.userName }));
     return;
   }
 
-  // ── 管理员接口 ──
-
-  // 权限检查中间件：仅应用所有者可访问
-  async function requireOwner(req, res) {
-    const token = req.headers['x-auth-token'];
-    if (!token || !sessions.has(token)) { res.writeHead(401); res.end(JSON.stringify({ error: '未登录' })); return false; }
-    const session = sessions.get(token);
-    const owners = await getAppOwnerId();
-    if (!owners.includes(session.openId)) { res.writeHead(403); res.end(JSON.stringify({ error: '仅应用所有者可访问' })); return false; }
-    return session;
-  }
-
-  // GET /api/admin/users — 待审批 + 已通过列表
-  if (parsedUrl.pathname === '/api/admin/users') {
-    const ok = await requireOwner(req, res);
-    if (!ok) return;
-    const pending = [];
-    for (const [openId, info] of pendingRequests) {
-      pending.push({ openId, userName: info.userName, requestedAt: info.requestedAt });
-    }
-    const approvedList = Object.entries(approved).map(([openId, info]) => ({
-      openId, userName: info.userName, approvedAt: info.approvedAt, isOwner: !!info.isOwner
-    }));
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
-    res.end(JSON.stringify({ pending, approved: approvedList }));
-    return;
-  }
-
-  // POST /api/admin/approve — 通过审批
-  if (parsedUrl.pathname === '/api/admin/approve') {
-    const ok = await requireOwner(req, res);
-    if (!ok) return;
-    let body = '';
-    req.on('data', chunk => body += chunk);
-    req.on('end', async () => {
-      try {
-        const { openId } = JSON.parse(body || '{}');
-        const info = pendingRequests.get(openId);
-        if (!info) { res.writeHead(404); res.end(JSON.stringify({ error: '申请不存在' })); return; }
-        approved[openId] = { userName: info.userName, approvedAt: new Date().toISOString() };
-        pendingRequests.delete(openId);
-        saveApproved();
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: true }));
-      } catch (e) {
-        res.writeHead(500);
-        res.end(JSON.stringify({ error: e.message }));
-      }
-    });
-    return;
-  }
-
-  // POST /api/admin/reject — 拒绝审批
-  if (parsedUrl.pathname === '/api/admin/reject') {
-    const ok = await requireOwner(req, res);
-    if (!ok) return;
-    let body = '';
-    req.on('data', chunk => body += chunk);
-    req.on('end', () => {
-      try {
-        const { openId } = JSON.parse(body || '{}');
-        pendingRequests.delete(openId);
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: true }));
-      } catch (e) {
-        res.writeHead(500);
-        res.end(JSON.stringify({ error: e.message }));
-      }
-    });
-    return;
-  }
-
-  // POST /api/admin/revoke — 撤销已通过用户
-  if (parsedUrl.pathname === '/api/admin/revoke') {
-    const ok = await requireOwner(req, res);
-    if (!ok) return;
-    let body = '';
-    req.on('data', chunk => body += chunk);
-    req.on('end', () => {
-      try {
-        const { openId } = JSON.parse(body || '{}');
-        if (approved[openId]?.isOwner) { res.writeHead(400); res.end(JSON.stringify({ error: '不能撤销应用所有者' })); return; }
-        delete approved[openId];
-        saveApproved();
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ok: true }));
-      } catch (e) {
-        res.writeHead(500);
-        res.end(JSON.stringify({ error: e.message }));
-      }
-    });
-    return;
-  }
-
-  // OPTIONS 预检
+  // OPTIONS
   if (req.method === 'OPTIONS') {
-    res.writeHead(200, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type,X-Feishu-Token,X-Auth-Token' });
+    res.writeHead(200, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type,X-Feishu-Token,X-Auth-Token'
+    });
     res.end();
     return;
   }
 
-  // 静态文件
-  let filePath = path.join(ROOT, parsedUrl.pathname === '/' ? 'index.html' : parsedUrl.pathname);
-  const ext = path.extname(filePath);
-  const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-
-  fs.readFile(filePath, (err, data) => {
+  // 静态文件（public/）
+  let p = parsed.pathname === '/' ? '/index.html' : parsed.pathname;
+  const fp = path.join(ROOT, 'public', p);
+  if (!fp.startsWith(path.join(ROOT, 'public'))) { res.writeHead(403); res.end(); return; }
+  const ext = path.extname(fp);
+  fs.readFile(fp, (err, data) => {
     if (err) { res.writeHead(404); res.end('Not Found'); return; }
-    res.writeHead(200, { 'Content-Type': contentType });
+    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
     res.end(data);
   });
-});
-
-server.listen(PORT, () => {
+}).listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
 });
