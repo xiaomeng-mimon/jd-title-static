@@ -4,7 +4,6 @@ const fs = require('fs');
 const path = require('path');
 const url = require('url');
 
-const PORT = CONFIG.port || 8080;
 const ROOT = __dirname;
 
 // 读取 config.json
@@ -15,6 +14,8 @@ try {
 } catch (e) {
   console.warn('config.json not found, using defaults:', e.message);
 }
+
+const PORT = CONFIG.port || 8080;
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
