@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>米萌标题智能运营</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>米萌标题智能运营</h1>
+      <p>基于高绩效样本的智能标题生成系统</p>
+    </header>
+
+    <!-- 认证状态 -->
+    <section class="card" id="auth-panel">
+      <h3><span class="step-badge">🔐</span> 身份认证 <span class="step-status" id="auth-status">未认证</span></h3>
+      <p style="font-size:13px;color:#8B7355;margin-bottom:12px;">输入 App Secret 获取 Token，或手动粘贴已有 Token</p>
+      <div class="input-row">
+        <div class="input-group">
+          <label>飞书链接</label>
+          <div style="position:relative;">
+            <input type="text" id="baseUrl" placeholder="粘贴飞书多维表格链接" />
+            <div id="hist-dropdown"></div>
+          </div>
+        </div>
+      </div>
+      <div class="input-row">
+        <div class="input-group">
+          <label>App Secret</label>
+          <input type="password" id="appSecret" placeholder="在飞书开发者后台 → 凭证与基础信息中获取" />
+        </div>
+      </div>
+      <details style="margin:8px 0;"><summary style="cursor:pointer;font-size:13px;color:#8B7355;">或手动输入 Token</summary>
+        <div class="input-group" style="margin-top:8px;">
+          <label>Token</label>
+          <input type="text" id="manualToken" placeholder="user_access_token 或 tenant_access_token" />
+        </div>
+      </details>
+      <button class="btn btn-primary" id="btn-auth" onclick="handleAuth()">认证并开始</button>
+      <button class="btn btn-secondary" onclick="handleDebugRecords()" style="margin-left:8px;font-size:12px;">调试：查看字段名</button>
+      <pre id="debug-output" style="margin-top:8px;background:#f5f5f5;padding:8px;font-size:11px;max-height:300px;overflow:auto;display:none;border-radius:4px;"></pre>
+    </section>
+
+    <!-- 分析配置 -->
+    <section class="card" id="config-panel" style="display:none;">
+      <h3><span class="step-badge">⚙️</span> 分析配置</h3>
+      <div class="date-range">
+        <div class="input-group">
+          <label>开始日期（可选）</label>
+          <input type="text" id="date-start" placeholder="2026/05/01" />
+        </div>
+        <div class="input-group">
+          <label>结束日期（可选）</label>
+          <input type="text" id="date-end" placeholder="2026/05/15" />
+        </div>
+      </div>
+      <div class="hint">留空则使用全部数据；填写后分析仅统计该日期范围内的记录</div>
+      <div style="margin-top:16px;">
+        <button class="btn btn-primary" id="btn-analyze" onclick="handleAnalyze()">开始分析</button>
+      </div>
+    </section>
+
+    <!-- 分析结果 -->
+    <section class="card" id="analysis-panel" style="display:none;">
+      <h3><span class="step-badge">📊</span> 数据分析 <span class="step-status" id="step1-status"></span></h3>
+      <div class="stat-grid" id="stat-grid"></div>
+      <div class="chart-row">
+        <div class="chart-box"><h4>🔥 热门词根 TOP10</h4><div id="word-cloud"></div></div>
+        <div class="chart-box"><h4>📊 型号分布</h4><div id="model-chart"></div></div>
+      </div>
+      <div class="chart-row" style="margin-top:16px;">
+        <div class="chart-box"><h4>🎯 标题属性分布</h4><div id="attribute-chart"></div></div>
+        <div class="chart-box"><h4>🏗️ 标题结构分布</h4><div id="structure-chart"></div></div>
+      </div>
+      <div style="margin-top:16px;">
+        <h4>🔍 行业热搜词 TOP10</h4>
+        <div id="industry-keywords"></div>
+      </div>
+      <div style="margin-top:16px;">
+        <h4>🏆 优秀绩效样本 TOP15</h4>
+        <div id="top-samples-table"></div>
+      </div>
+    </section>
+
+    <!-- 趋势分析 -->
+    <section class="card" id="trend-panel" style="display:none;">
+      <h3><span class="step-badge">📈</span> 趋势分析</h3>
+      <div id="trend-summary"></div>
+      <div id="trend-comparison"></div>
+      <div id="trend-chart-area"></div>
+      <div id="trend-models"></div>
+      <div id="trend-findings"></div>
+      <details style="margin-top:12px;"><summary style="cursor:pointer;font-size:13px;color:#8B7355;">查看原始 JSON</summary><pre id="trend-raw-json" style="font-size:12px;background:#FDF5EE;padding:12px;border-radius:8px;overflow-x:auto;max-height:300px;"></pre></details>
+    </section>
+
+    <!-- 生成标题 -->
+    <section class="card" id="generate-panel" style="display:none;">
+      <h3><span class="step-badge">✍️</span> 生成标题</h3>
+      <div id="strategy-panel"></div>
+      <button class="btn btn-primary" id="btn-generate" onclick="handleGenerate()">生成标题</button>
+      <button class="btn btn-secondary" id="btn-regenerate" onclick="handleGenerate()" style="margin-left:8px;">重新生成</button>
+    </section>
+
+    <!-- 标题结果 -->
+    <section class="card" id="result-panel" style="display:none;">
+      <h3><span class="step-badge">✅</span> 生成结果</h3>
+      <div id="titles-container"></div>
+    </section>
+  </div>
+
+  <div class="loading-overlay" id="loading" style="display:none;">
+    <div class="loading-spinner"><div class="spinner"></div><p id="loading-text">加载中...</p></div>
+  </div>
+
+  <script>
+    // 从服务端加载配置（apiKey 不暴露到前端）
+    window.APP_CONFIG = {};
+    fetch('/api/config').then(r => r.json()).then(cfg => {
+      window.APP_CONFIG = cfg;
+    }).catch(e => console.warn('加载配置失败:', e));
+  </script>
+  <script src="lib/config.js"></script>
+  <script src="lib/knowledge-base.js"></script>
+  <script src="lib/analyzer.js"></script>
+  <script src="lib/generator.js"></script>
+  <script src="lib/trend.js"></script>
+  <script src="lib/lark-api.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
