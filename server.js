@@ -96,10 +96,10 @@ async function getTenantToken() {
   return tenantToken;
 }
 
-// 应用所有者（缓存 10 分钟）
+// 应用所有者（缓存 1 分钟，避免权限转让后旧主还能进管理页太久）
 let ownerCache = null, ownerCacheTime = 0;
 async function getAppOwnerId() {
-  if (ownerCache && Date.now() - ownerCacheTime < 600000) return ownerCache;
+  if (ownerCache && Date.now() - ownerCacheTime < 60000) return ownerCache;
   try {
     const t = await getAppToken();
     const d = await feishuReq('GET',
