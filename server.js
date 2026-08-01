@@ -350,6 +350,100 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ── 管理员接口 ──
+
+  // 权限检查中间件：仅应用所有者可访问
+  async function requireOwner(req, res) {
+    const token = req.headers['x-auth-token'];
+    if (!token || !sessions.has(token)) { res.writeHead(401); res.end(JSON.stringify({ error: '未登录' })); return false; }
+    const session = sessions.get(token);
+    const owners = await getAppOwnerId();
+    if (!owners.includes(session.openId)) { res.writeHead(403); res.end(JSON.stringify({ error: '仅应用所有者可访问' })); return false; }
+    return session;
+  }
+
+  // GET /api/admin/users — 待审批 + 已通过列表
+  if (parsedUrl.pathname === '/api/admin/users') {
+    const ok = await requireOwner(req, res);
+    if (!ok) return;
+    const pending = [];
+    for (const [openId, info] of pendingRequests) {
+      pending.push({ openId, userName: info.userName, requestedAt: info.requestedAt });
+    }
+    const approvedList = Object.entries(approved).map(([openId, info]) => ({
+      openId, userName: info.userName, approvedAt: info.approvedAt, isOwner: !!info.isOwner
+    }));
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+    res.end(JSON.stringify({ pending, approved: approvedList }));
+    return;
+  }
+
+  // POST /api/admin/approve — 通过审批
+  if (parsedUrl.pathname === '/api/admin/approve') {
+    const ok = await requireOwner(req, res);
+    if (!ok) return;
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const { openId } = JSON.parse(body || '{}');
+        const info = pendingRequests.get(openId);
+        if (!info) { res.writeHead(404); res.end(JSON.stringify({ error: '申请不存在' })); return; }
+        approved[openId] = { userName: info.userName, approvedAt: new Date().toISOString() };
+        pendingRequests.delete(openId);
+        saveApproved();
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
+  // POST /api/admin/reject — 拒绝审批
+  if (parsedUrl.pathname === '/api/admin/reject') {
+    const ok = await requireOwner(req, res);
+    if (!ok) return;
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const { openId } = JSON.parse(body || '{}');
+        pendingRequests.delete(openId);
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
+  // POST /api/admin/revoke — 撤销已通过用户
+  if (parsedUrl.pathname === '/api/admin/revoke') {
+    const ok = await requireOwner(req, res);
+    if (!ok) return;
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const { openId } = JSON.parse(body || '{}');
+        if (approved[openId]?.isOwner) { res.writeHead(400); res.end(JSON.stringify({ error: '不能撤销应用所有者' })); return; }
+        delete approved[openId];
+        saveApproved();
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
   // OPTIONS 预检
   if (req.method === 'OPTIONS') {
     res.writeHead(200, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type,X-Feishu-Token,X-Auth-Token' });
