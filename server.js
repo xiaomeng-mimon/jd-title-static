@@ -35,6 +35,71 @@ function approveUser(openId, userName, department) {
   saveApproved(a);
 }
 
+// ── 数据缓存（记忆机制，避免每次全量拉取） ──
+const CACHE_DIR = path.join(ROOT, 'cache');
+function ensureCacheDir() { if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true }); }
+function getCachePath(tableId) { return path.join(CACHE_DIR, `records_${tableId}.json`); }
+function getCacheMetaPath() { return path.join(CACHE_DIR, '_meta.json'); }
+
+function loadCacheMeta() {
+  try { return JSON.parse(fs.readFileSync(getCacheMetaPath(), 'utf-8')); } catch { return {}; }
+}
+function saveCacheMeta(meta) {
+  ensureCacheDir();
+  fs.writeFileSync(getCacheMetaPath(), JSON.stringify(meta, null, 2));
+}
+
+function loadCachedRecords(tableId) {
+  try { return JSON.parse(fs.readFileSync(getCachePath(tableId), 'utf-8')); } catch { return null; }
+}
+function saveCachedRecords(tableId, records, total) {
+  ensureCacheDir();
+  fs.writeFileSync(getCachePath(tableId), JSON.stringify(records));
+  const meta = loadCacheMeta();
+  meta[tableId] = { total, updatedAt: new Date().toISOString() };
+  saveCacheMeta(meta);
+}
+
+// 探测飞书表记录总数（只拉 1 条，取 total）
+async function probeRecordTotal(baseToken, tableId) {
+  try {
+    const t = await getTenantToken();
+    const data = await feishuReq('GET',
+      `/open-apis/bitable/v1/apps/${baseToken}/tables/${tableId}/records?page_size=1`, null, t);
+    if (data.code === 0 && data.data) {
+      return { total: data.data.total || 0, hasMore: data.data.has_more };
+    }
+  } catch (e) { console.warn('probeRecordTotal failed:', e.message); }
+  return null;
+}
+
+// 全量拉取所有记录（分页，存缓存）
+async function fetchAllRecords(baseToken, tableId) {
+  const t = await getTenantToken();
+  const allRecords = [];
+  let pageToken = null;
+  while (true) {
+    const qs = `page_size=200${pageToken ? '&page_token=' + pageToken : ''}`;
+    const data = await feishuReq('GET',
+      `/open-apis/bitable/v1/apps/${baseToken}/tables/${tableId}/records?${qs}`, null, t);
+    if (data.code !== 0 || !data.data) throw new Error(data.msg || 'fetch failed');
+    const items = data.data.items || [];
+    for (const item of items) {
+      const flat = {};
+      for (const [k, v] of Object.entries(item.fields)) {
+        flat[k] = typeof v === 'object' && v !== null && 'value' in v ? v : { value: v };
+      }
+      flat['record_id'] = { value: item.record_id };
+      allRecords.push(flat);
+    }
+    if (!data.data.has_more) {
+      saveCachedRecords(tableId, allRecords, data.data.total || allRecords.length);
+      return allRecords;
+    }
+    pageToken = data.data.page_token;
+  }
+}
+
 const sessions = new Map();
 const pendingRequests = new Map();
 
@@ -316,6 +381,56 @@ const router = {
       app_id: APP_ID,
       llm_model: CONFIG.llm_model || ''
     });
+  },
+
+  // ── 数据缓存读取（记忆机制）──
+  'POST /api/cache/fetch-records': async (req, res) => {
+    try {
+      const body = await parseBody(req);
+      const { baseToken, tableId } = body;
+      if (!baseToken || !tableId) { sendJSON(res, 400, { ok: false, error: '缺少 baseToken 或 tableId' }); return; }
+
+      // 1. 探测远程记录总数
+      const probe = await probeRecordTotal(baseToken, tableId);
+      const remoteTotal = probe ? probe.total : null;
+
+      // 2. 检查本地缓存
+      const meta = loadCacheMeta();
+      const cached = meta[tableId];
+      const cachedTotal = cached ? cached.total : 0;
+
+      // 3. 缓存命中（远程总数未变）→ 直接返回缓存
+      if (remoteTotal !== null && cachedTotal === remoteTotal && remoteTotal > 0) {
+        const records = loadCachedRecords(tableId);
+        if (records) {
+          sendJSON(res, 200, { ok: true, fromCache: true, total: remoteTotal, records, cachedAt: cached.updatedAt });
+          return;
+        }
+      }
+
+      // 4. 缓存未命中或有新数据 → 全量拉取
+      const records = await fetchAllRecords(baseToken, tableId);
+      sendJSON(res, 200, { ok: true, fromCache: false, total: records.length, records, cachedAt: new Date().toISOString() });
+    } catch (e) {
+      sendJSON(res, 500, { ok: false, error: e.message });
+    }
+  },
+
+  // ── 清除缓存 ──
+  'POST /api/cache/invalidate': async (req, res) => {
+    try {
+      const body = await parseBody(req);
+      const { tableId } = body;
+      if (!tableId) { sendJSON(res, 400, { ok: false, error: '缺少 tableId' }); return; }
+      const cachePath = getCachePath(tableId);
+      if (fs.existsSync(cachePath)) fs.unlinkSync(cachePath);
+      const meta = loadCacheMeta();
+      delete meta[tableId];
+      saveCacheMeta(meta);
+      sendJSON(res, 200, { ok: true, message: '缓存已清除' });
+    } catch (e) {
+      sendJSON(res, 500, { ok: false, error: e.message });
+    }
   }
 };
 
