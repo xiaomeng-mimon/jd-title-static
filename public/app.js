@@ -224,7 +224,7 @@ async function handleAnalyze() {
 
     // 4. 拉取所有原始记录（本地聚合，避免 data/query 权限问题）
     showLoading('正在拉取所有原始记录...');
-    const records = await fetchRecords(baseToken, mainTable.id);
+    const records = await fetchRecordsCached(baseToken, mainTable.id);
 
     // 5. 按日期过滤 + 本地聚合
     const hasDateFilter = dateRange.start || dateRange.end;
@@ -236,7 +236,7 @@ async function handleAnalyze() {
     let industryKeywords = [];
     for (const kt of keywordTables) {
       showLoading(`正在拉取热搜词: ${kt.name}...`);
-      const records = await fetchRecords(baseToken, kt.id);
+      const records = await fetchRecordsCached(baseToken, kt.id);
       industryKeywords.push(...records);
     }
     // 按日期筛选热搜词

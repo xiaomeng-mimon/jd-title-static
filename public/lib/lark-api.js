@@ -84,6 +84,19 @@ async function fetchRecords(baseToken, tableId, pageSize = 200) {
   return allRecords;
 }
 
+// 带缓存的记录拉取（通过服务端缓存，避免每次全量）
+async function fetchRecordsCached(baseToken, tableId) {
+  const res = await fetch('/api/cache/fetch-records', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ baseToken, tableId })
+  });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || '缓存取数失败');
+  console.log(`[缓存] ${data.fromCache ? '命中' : '全量拉取'}，共 ${data.total} 条${data.cachedAt ? '，缓存时间: ' + data.cachedAt : ''}`);
+  return data.records;
+}
+
 async function getTableListWithInfo(baseToken) {
   const tables = await getTableList(baseToken);
   return tables.map(t => ({ id: t.table_id, name: t.name }));
