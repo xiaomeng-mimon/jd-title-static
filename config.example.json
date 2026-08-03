@@ -1,0 +1,8 @@
+{
+  "app_id": "cli_xxxxxxxxxxxxxxxx",
+  "app_secret": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "port": 8080,
+  "llm_model": "deepseek-chat",
+  "llm_endpoint": "https://api.deepseek.com/v1/chat/completions",
+  "llm_api_key": "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+}
