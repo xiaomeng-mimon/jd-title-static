@@ -178,14 +178,30 @@ async function getAppOwnerId() {
 
 // 部门查询
 async function getDepartment(openId) {
+  // 方式一：租户 token 调通讯录 API（需 contact:contact:readonly 权限）
   try {
     const t = await getTenantToken();
     const d = await feishuReq('GET',
       `/open-apis/contact/v3/users/${openId}?department_id_type=open_department_id`, null, t);
     if (d.code === 0 && d.data?.user?.department_ids?.length > 0) {
+      console.log('[部门] 获取成功:', d.data.user.department_ids.join(','));
       return d.data.user.department_ids.join(',');
     }
-  } catch (e) { /* ignore */ }
+    if (d.code !== 0) console.warn('[部门] API 返回错误:', d.code, d.msg);
+  } catch (e) { console.error('[部门] 方式一失败:', e.message); }
+
+  // 方式二：应用 token 调通讯录 API（需 contact:contact:readonly 权限）
+  try {
+    const t = await getAppToken();
+    const d = await feishuReq('GET',
+      `/open-apis/contact/v3/users/${openId}?department_id_type=open_department_id`, null, t);
+    if (d.code === 0 && d.data?.user?.department_ids?.length > 0) {
+      console.log('[部门] 方式二获取成功:', d.data.user.department_ids.join(','));
+      return d.data.user.department_ids.join(',');
+    }
+    if (d.code !== 0) console.warn('[部门] 方式二 API 返回错误:', d.code, d.msg);
+  } catch (e) { console.error('[部门] 方式二失败:', e.message); }
+
   return '';
 }
 
