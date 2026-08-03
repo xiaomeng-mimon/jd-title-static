@@ -442,6 +442,18 @@ const router = {
     }
   },
 
+  // ── 调试：查看原始记录字段名 ──
+  'POST /api/debug-records': async (req, res) => {
+    try {
+      const body = await parseBody(req);
+      const { baseToken, tableId, token } = body;
+      if (!baseToken || !tableId) { sendJSON(res, 400, { ok: false }); return; }
+      const data = await feishuReq('GET',
+        `/open-apis/bitable/v1/apps/${baseToken}/tables/${tableId}/records?page_size=1`, null, token || await getTenantToken());
+      sendJSON(res, 200, data);
+    } catch (e) { sendJSON(res, 500, { ok: false, error: e.message }); }
+  },
+
   // ── 清除缓存 ──
   'POST /api/cache/invalidate': async (req, res) => {
     try {
