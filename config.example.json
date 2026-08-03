@@ -1,8 +1,8 @@
 {
-  "app_id": "cli_xxxxxxxxxxxxxxxx",
-  "app_secret": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "app_id": "向管理员获取",
+  "app_secret": "向管理员获取",
   "port": 8080,
   "llm_model": "deepseek-chat",
   "llm_endpoint": "https://api.deepseek.com/v1/chat/completions",
-  "llm_api_key": "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  "llm_api_key": "向管理员获取"
 }
