@@ -290,6 +290,15 @@ const router = {
       const isOwner = (openId === appOwner);
       const approved = isOwner || isApproved(openId);
       if (isOwner && !isApproved(openId)) { approveUser(openId, userName, department); }
+      // 已通过用户每次登录时更新部门信息
+      if (approved && department) {
+        const a = loadApproved();
+        if (a[openId] && !a[openId].department) {
+          a[openId].department = department;
+          saveApproved(a);
+          console.log('[部门] 已更新', userName, '部门:', department);
+        }
+      }
       const crypto = require('crypto');
       const token = crypto.randomBytes(24).toString('hex');
       sessions.set(token, { openId, userName, department, approved, createdAt: Date.now() });
@@ -466,7 +475,9 @@ http.createServer(async (req, res) => {
     try {
       const body = await parseBody(req);
       const authHeader = req.headers['x-feishu-token'] ? { 'Authorization': `Bearer ${req.headers['x-feishu-token']}` } : {};
-      const result = await proxyWithRetry(decodeURIComponent(target), req.method, authHeader, body.body ? JSON.stringify(body.body) : null);
+      // body 可能是 {body: ...} 包裹格式，也可能是直接 JSON（如 getTenantToken）
+      const proxyBody = body.body ? JSON.stringify(body.body) : (Object.keys(body).length > 0 ? JSON.stringify(body) : null);
+      const result = await proxyWithRetry(decodeURIComponent(target), req.method, authHeader, proxyBody);
       res.writeHead(200, { ...CT_JSON, 'Access-Control-Allow-Origin': '*' });
       res.end(result);
     } catch (e) {
