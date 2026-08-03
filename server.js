@@ -177,30 +177,31 @@ async function getAppOwnerId() {
 }
 
 // 部门查询
-async function getDepartment(openId) {
-  // 方式一：租户 token 调通讯录 API（需 contact:contact:readonly 权限）
+async function getDepartment(openId, userToken) {
+  // 用用户 token 调通讯录 API（需 contact:user:search 用户身份权限，跟 jd-promotion-analyzer 一致）
+  if (userToken) {
+    try {
+      const d = await feishuReq('GET',
+        `/open-apis/contact/v3/users/${openId}`, null, userToken);
+      if (d.code === 0 && d.data?.user?.department_ids?.length > 0) {
+        console.log('[部门] 获取成功:', d.data.user.department_ids.join(','));
+        return d.data.user.department_ids.join(',');
+      }
+      if (d.code !== 0) console.warn('[部门] 用户token查询失败:', d.code, d.msg);
+    } catch (e) { console.error('[部门] 用户token方式失败:', e.message); }
+  }
+
+  // 备用：租户 token（需 contact:contact:readonly 应用身份权限）
   try {
     const t = await getTenantToken();
     const d = await feishuReq('GET',
-      `/open-apis/contact/v3/users/${openId}?department_id_type=open_department_id`, null, t);
+      `/open-apis/contact/v3/users/${openId}`, null, t);
     if (d.code === 0 && d.data?.user?.department_ids?.length > 0) {
-      console.log('[部门] 获取成功:', d.data.user.department_ids.join(','));
+      console.log('[部门] 租户token获取成功:', d.data.user.department_ids.join(','));
       return d.data.user.department_ids.join(',');
     }
-    if (d.code !== 0) console.warn('[部门] API 返回错误:', d.code, d.msg);
-  } catch (e) { console.error('[部门] 方式一失败:', e.message); }
-
-  // 方式二：应用 token 调通讯录 API（需 contact:contact:readonly 权限）
-  try {
-    const t = await getAppToken();
-    const d = await feishuReq('GET',
-      `/open-apis/contact/v3/users/${openId}?department_id_type=open_department_id`, null, t);
-    if (d.code === 0 && d.data?.user?.department_ids?.length > 0) {
-      console.log('[部门] 方式二获取成功:', d.data.user.department_ids.join(','));
-      return d.data.user.department_ids.join(',');
-    }
-    if (d.code !== 0) console.warn('[部门] 方式二 API 返回错误:', d.code, d.msg);
-  } catch (e) { console.error('[部门] 方式二失败:', e.message); }
+    if (d.code !== 0) console.warn('[部门] 租户token查询失败:', d.code, d.msg);
+  } catch (e) { console.error('[部门] 租户token方式失败:', e.message); }
 
   return '';
 }
@@ -281,9 +282,9 @@ const router = {
       if (iData.code !== 0 || !iData.data) throw new Error('用户信息获取失败');
       const openId = iData.data.open_id;
       const userName = iData.data.name;
-      // 4. 获取部门
+      // 4. 获取部门（用用户 token，走 contact:user:search 权限）
       let department = '';
-      try { department = await getDepartment(openId); } catch (e) { /* ignore */ }
+      try { department = await getDepartment(openId, uData.data.access_token); } catch (e) { /* ignore */ }
       // 5. 创建 session（应用所有者自动通过）
       const appOwner = await getAppOwnerId();
       const isOwner = (openId === appOwner);
