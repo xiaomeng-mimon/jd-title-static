@@ -1,65 +1,15 @@
-// ── LLM 预设（仅供快捷填充，不限制用户修改） ──
-var LLM_PRESETS = [
-  { key: 'deepseek', label: 'DeepSeek',  endpoint: 'https://api.deepseek.com/v1/chat/completions',
-    opts: { response_format: { type: 'json_object' }, thinking: { type: 'disabled' } },
-    models: [{ id: 'deepseek-v4-pro',   label: 'V4 Pro' },
-             { id: 'deepseek-v4-flash', label: 'V4 Flash' }] },
-  { key: 'openai',   label: 'OpenAI',    endpoint: 'https://api.openai.com/v1/chat/completions',
-    opts: { response_format: { type: 'json_object' } },
-    models: [{ id: 'gpt-4o',       label: 'GPT-4o' },
-             { id: 'gpt-4.1',      label: 'GPT-4.1' },
-             { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
-             { id: 'o4-mini',      label: 'o4 Mini' }] },
-  { key: 'groq',     label: 'Groq',      endpoint: 'https://api.groq.com/openai/v1/chat/completions',
-    opts: { response_format: { type: 'json_object' } },
-    models: [{ id: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B' },
-             { id: 'llama-4-scout-17b-16e',    label: 'Llama 4 Scout' },
-             { id: 'deepseek-r1-distill-llama-70b', label: 'DeepSeek R1 (Llama)' }] },
-  { key: 'zhipu',    label: '智谱',       endpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
-    models: [{ id: 'glm-4',      label: 'GLM-4' },
-             { id: 'glm-4-plus', label: 'GLM-4 Plus' },
-             { id: 'glm-4-flash',label: 'GLM-4 Flash' }] },
-  { key: 'qwen',     label: '通义千问',   endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
-    models: [{ id: 'qwen-max',   label: 'Qwen Max' },
-             { id: 'qwen-plus',  label: 'Qwen Plus' },
-             { id: 'qwen-turbo', label: 'Qwen Turbo' }] },
-  { key: 'moonshot', label: '月之暗面',   endpoint: 'https://api.moonshot.cn/v1/chat/completions',
-    models: [{ id: 'moonshot-v1-8k',  label: 'Moonshot v1 8K' },
-             { id: 'moonshot-v1-32k', label: 'Moonshot v1 32K' },
-             { id: 'moonshot-v1-128k',label: 'Moonshot v1 128K' }] },
-  { key: 'mimo',     label: 'mimo',       endpoint: 'https://token-plan-cn.xiaomimimo.com/v1/chat/completions',
-    models: [{ id: 'mimo-v2.5-pro', label: 'V2.5 Pro' }] }
-];
-
 function getUserLLMConfig() {
-  var all = {};
-  try { all = JSON.parse(localStorage.getItem('jd-llm-config') || '{}'); } catch(e) {}
-  var active = all.active || '';
-  var cfg = (active && all.providers && all.providers[active]) ? all.providers[active] : {};
+  var saved = {};
+  try { saved = JSON.parse(localStorage.getItem('jd-llm-config') || '{}'); } catch(e) {}
   // 优先取 DOM 当前值（避免 onchange 未触发），兜底 localStorage
-  var modelEl = document.getElementById('llm-model-text');
-  var selEl = document.getElementById('llm-model-select');
-  var model = (selEl && selEl.style.display !== 'none') ? selEl.value : (modelEl ? modelEl.value : '');
+  var model = document.getElementById('llm-model') ? document.getElementById('llm-model').value : '';
   var endpoint = document.getElementById('llm-endpoint') ? document.getElementById('llm-endpoint').value : '';
   var apiKey = document.getElementById('llm-apikey') ? document.getElementById('llm-apikey').value : '';
   return {
-    active: active,
-    model:    model    || cfg.model    || '',
-    endpoint: endpoint || cfg.endpoint || '',
-    apiKey:   apiKey   || cfg.apiKey   || ''
+    model:    model    || saved.model    || '',
+    endpoint: endpoint || saved.endpoint || '',
+    apiKey:   apiKey   || saved.apiKey   || ''
   };
-}
-function saveUserLLMConfig(cfg) {
-  var all = {};
-  try { all = JSON.parse(localStorage.getItem('jd-llm-config') || '{}'); } catch(e) {}
-  if (!all.providers) all.providers = {};
-  all.active = cfg.active || all.active;
-  all.providers[all.active] = {
-    model: cfg.model || '',
-    endpoint: cfg.endpoint || '',
-    apiKey: cfg.apiKey || ''
-  };
-  localStorage.setItem('jd-llm-config', JSON.stringify(all));
 }
 
 // ── LLM 配置（从 localStorage 用户配置读取） ──
@@ -148,9 +98,8 @@ async function callLLM(systemPrompt, userMessage) {
     throw new Error('请填写 LLM API Key');
   }
 
-  // 按服务商预设合并特殊参数；自定义模式关思考避免 content 为空
-  var preset = cfg.active ? LLM_PRESETS.find(function(p) { return p.key === cfg.active; }) : null;
-  var extraOpts = (preset && preset.opts) ? preset.opts : { thinking: { type: 'disabled' } };
+  // 关思考模式避免 content 为空
+  var extraOpts = { thinking: { type: 'disabled' } };
   var body = Object.assign({
     model: cfg.model,
     endpoint: cfg.endpoint,

@@ -47,15 +47,10 @@
       <div style="margin-top:16px;" id="llm-config-details">
         <div style="font-size:13px;color:#8B7355;margin-bottom:6px;">🤖 LLM 配置（用于标题生成）</div>
         <div>
-          <div style="margin-bottom:4px;font-size:12px;color:#8B7355;">快捷填充：</div>
-          <div id="llm-presets" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;"></div>
           <div class="input-row">
             <div class="input-group">
               <label>Model</label>
-              <input type="text" id="llm-model-text" placeholder="模型名，如 hermes-v3、gpt-4o" onchange="onLLMFieldChange()" autocomplete="off" style="display:block;" />
-              <select id="llm-model-select" onchange="onLLMModelSelectChange()" style="display:none;width:100%;padding:10px 14px;border:1px solid #D4A574;border-radius:8px;font-size:14px;background:#FFF;color:#4A3728;outline:none;">
-                <option value="">-- 选择模型 --</option>
-              </select>
+              <input type="text" id="llm-model" placeholder="模型名，如 deepseek-v4-pro、gpt-4o" onchange="onLLMFieldChange()" autocomplete="off" />
             </div>
             <div class="input-group">
               <label>API Key</label>
