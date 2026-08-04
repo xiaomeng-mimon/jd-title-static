@@ -122,7 +122,7 @@ document.getElementById('baseUrl').addEventListener('focus', () => { renderHisto
 document.getElementById('baseUrl').addEventListener('input', () => { document.getElementById('hist-dropdown').classList.remove('show'); });
 document.addEventListener('click', (e) => {
   if (e.target.classList.contains('hist-item')) { document.getElementById('baseUrl').value = e.target.dataset.url; document.getElementById('hist-dropdown').classList.remove('show'); }
-  if (e.target.classList.contains('hist-clear')) { localStorage.removeItem('jd-url-history'); document.getElementById('hist-dropdown').classList.remove('show'); }
+  if (e.target.classList.contains('hist-clear')) { localStorage.removeItem('jd-url-history'); var dd = document.getElementById('hist-dropdown'); dd.innerHTML = ''; dd.classList.remove('show'); }
   if (!e.target.closest('#baseUrl') && !e.target.closest('#hist-dropdown')) { document.getElementById('hist-dropdown').classList.remove('show'); }
 });
 
