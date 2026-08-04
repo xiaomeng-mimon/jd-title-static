@@ -36,11 +36,17 @@ function getUserLLMConfig() {
   try { all = JSON.parse(localStorage.getItem('jd-llm-config') || '{}'); } catch(e) {}
   var active = all.active || '';
   var cfg = (active && all.providers && all.providers[active]) ? all.providers[active] : {};
+  // 优先取 DOM 当前值（避免 onchange 未触发），兜底 localStorage
+  var modelEl = document.getElementById('llm-model-text');
+  var selEl = document.getElementById('llm-model-select');
+  var model = (selEl && selEl.style.display !== 'none') ? selEl.value : (modelEl ? modelEl.value : '');
+  var endpoint = document.getElementById('llm-endpoint') ? document.getElementById('llm-endpoint').value : '';
+  var apiKey = document.getElementById('llm-apikey') ? document.getElementById('llm-apikey').value : '';
   return {
     active: active,
-    model:    cfg.model    || '',
-    endpoint: cfg.endpoint || '',
-    apiKey:   cfg.apiKey   || ''
+    model:    model    || cfg.model    || '',
+    endpoint: endpoint || cfg.endpoint || '',
+    apiKey:   apiKey   || cfg.apiKey   || ''
   };
 }
 function saveUserLLMConfig(cfg) {
@@ -142,9 +148,9 @@ async function callLLM(systemPrompt, userMessage) {
     throw new Error('请填写 LLM API Key');
   }
 
-  // 按服务商预设合并特殊参数（如 JSON 模式、思考模式关闭等）
-  var preset = LLM_PRESETS.find(function(p) { return p.key === cfg.active; });
-  var extraOpts = (preset && preset.opts) ? preset.opts : {};
+  // 按服务商预设合并特殊参数；自定义模式关思考避免 content 为空
+  var preset = cfg.active ? LLM_PRESETS.find(function(p) { return p.key === cfg.active; }) : null;
+  var extraOpts = (preset && preset.opts) ? preset.opts : { thinking: { type: 'disabled' } };
   var body = Object.assign({
     model: cfg.model,
     endpoint: cfg.endpoint,
@@ -266,6 +272,7 @@ function parseLLMResponse(content) {
     if (Array.isArray(parsed)) return parsed;
   }
 
+  console.error('[解析失败] LLM 返回内容:', content.substring(0, 500));
   throw new Error('无法解析 LLM 返回内容');
 }
 

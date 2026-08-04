@@ -499,33 +499,26 @@ http.createServer(async (req, res) => {
     return;
   }
 
-  // /api/llm（优先用前端传的 endpoint/apiKey，否则用服务器配置）
+  // /api/llm — 统一转发 xinmeiti 网关（员工自带Key或服务器兜底全走 xinmeiti）
   if (parsed.pathname === '/api/llm') {
     try {
       const body = await parseBody(req);
-      // 前端传了 endpoint 就用前端完整配置，否则用服务器默认
-      console.log("[LLM]", body.model || "?", "->", (body.endpoint || "server").substring(0,50), "| key:", body.apiKey ? "***" + body.apiKey.slice(-4) : "(未填)");
-      const useServerDefault = !body.endpoint;
-      const endpoint = body.endpoint || CONFIG.llm_endpoint || "";
-      const apiKey = body.apiKey || (useServerDefault ? CONFIG.llm_api_key || "" : "");
-      if (!endpoint || !apiKey) {
-        res.writeHead(500); res.end(JSON.stringify({ error: { message: 'LLM 未配置，请填写所选模型的 API Key' } })); return;
-      }
-      const llmUrl = new URL(endpoint);
+      console.log("[LLM]", body.model || "?", "-> xinmeiti");
+      const payload = JSON.stringify({
+        model: body.model,
+        messages: body.messages,
+        temperature: body.temperature,
+        maxTokens: body.maxTokens,
+        endpoint: body.endpoint || '',
+        apiKey: body.apiKey || '',
+        thinking: body.thinking
+      });
       const result = await new Promise((resolve, reject) => {
-        const r = https.request({
-          hostname: llmUrl.hostname, port: llmUrl.port || 443, path: llmUrl.pathname, method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`
-          }
+        const r = http.request({
+          hostname: '192.168.101.13', port: 5000, path: '/api/llm', method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
         }, res2 => { let d = ''; res2.on('data', c => d += c); res2.on('end', () => resolve(d)); });
-        r.on('error', reject);
-        var llmPayload = { model: body.model, messages: body.messages, temperature: body.temperature, max_tokens: body.maxTokens };
-        if (body.thinking !== undefined) llmPayload.thinking = body.thinking;
-        if (body.response_format) llmPayload.response_format = body.response_format;
-        r.write(JSON.stringify(llmPayload));
-        r.end();
+        r.on('error', reject); r.write(payload); r.end();
       });
       res.writeHead(200, { ...CT_JSON, 'Access-Control-Allow-Origin': '*' });
       res.end(result);

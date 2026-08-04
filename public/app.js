@@ -213,7 +213,7 @@ function onLLMFieldChange() {
   var all = {};
   try { all = JSON.parse(localStorage.getItem('jd-llm-config') || '{}'); } catch(e) {}
   var active = all.active;
-  if (!active) return;
+  if (!active) { all.active = 'custom'; active = 'custom'; }
   if (!all.providers) all.providers = {};
   if (!all.providers[active]) all.providers[active] = { model: '', endpoint: '', apiKey: '' };
   var modelEl = document.getElementById('llm-model-select').style.display === 'none' ? document.getElementById('llm-model-text') : document.getElementById('llm-model-select');
