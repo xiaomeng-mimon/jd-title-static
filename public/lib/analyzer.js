@@ -102,8 +102,7 @@ function analyzeStructures(samples) {
 }
 
 function analyzeWordCount(samples) {
-  const counts = samples.map(r => { const t = r['视频名称']?.value || ''; return t.replace(/[\s💡✅～😭🥘❗🎁]/g, '').length; }).filter(function(c) { return c >= 5 && c <= 27; });
-  if (!counts.length) return { avg: '0', min: 0, max: 0, p25: 0, p75: 0, all: [] };
+  const counts = samples.map(r => { const t = r['视频名称']?.value || ''; return t.replace(/[\s💡✅～😭🥘❗🎁]/g, '').length; });
   const sorted = [...counts].sort((a, b) => a - b);
   const avg = counts.reduce((a, b) => a + b, 0) / counts.length;
   return { avg: avg.toFixed(1), min: sorted[0], max: sorted[sorted.length - 1], p25: sorted[Math.floor(sorted.length * 0.25)], p75: sorted[Math.floor(sorted.length * 0.75)], all: counts };
