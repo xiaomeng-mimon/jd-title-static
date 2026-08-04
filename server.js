@@ -515,7 +515,7 @@ http.createServer(async (req, res) => {
       });
       const result = await new Promise((resolve, reject) => {
         const r = http.request({
-          hostname: '192.168.101.13', port: 5000, path: '/api/llm', method: 'POST',
+          hostname: 'localhost', port: 5000, path: '/api/llm', method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
         }, res2 => { let d = ''; res2.on('data', c => d += c); res2.on('end', () => resolve(d)); });
         r.on('error', reject); r.write(payload); r.end();
