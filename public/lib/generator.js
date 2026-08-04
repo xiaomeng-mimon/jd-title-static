@@ -1,12 +1,70 @@
-// ── LLM 配置（从服务端 /api/config 获取，apiKey 由服务端注入不暴露到前端） ──
-const LLM_CONFIG = {
-  get model() { return (window.APP_CONFIG && window.APP_CONFIG.llm_model) || ''; },
+// ── LLM 预设（仅供快捷填充，不限制用户修改） ──
+var LLM_PRESETS = [
+  { key: 'deepseek', label: 'DeepSeek',  endpoint: 'https://api.deepseek.com/v1/chat/completions',
+    opts: { response_format: { type: 'json_object' }, thinking: { type: 'disabled' } },
+    models: [{ id: 'deepseek-v4-pro',   label: 'V4 Pro' },
+             { id: 'deepseek-v4-flash', label: 'V4 Flash' }] },
+  { key: 'openai',   label: 'OpenAI',    endpoint: 'https://api.openai.com/v1/chat/completions',
+    opts: { response_format: { type: 'json_object' } },
+    models: [{ id: 'gpt-4o',       label: 'GPT-4o' },
+             { id: 'gpt-4.1',      label: 'GPT-4.1' },
+             { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
+             { id: 'o4-mini',      label: 'o4 Mini' }] },
+  { key: 'groq',     label: 'Groq',      endpoint: 'https://api.groq.com/openai/v1/chat/completions',
+    opts: { response_format: { type: 'json_object' } },
+    models: [{ id: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B' },
+             { id: 'llama-4-scout-17b-16e',    label: 'Llama 4 Scout' },
+             { id: 'deepseek-r1-distill-llama-70b', label: 'DeepSeek R1 (Llama)' }] },
+  { key: 'zhipu',    label: '智谱',       endpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+    models: [{ id: 'glm-4',      label: 'GLM-4' },
+             { id: 'glm-4-plus', label: 'GLM-4 Plus' },
+             { id: 'glm-4-flash',label: 'GLM-4 Flash' }] },
+  { key: 'qwen',     label: '通义千问',   endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
+    models: [{ id: 'qwen-max',   label: 'Qwen Max' },
+             { id: 'qwen-plus',  label: 'Qwen Plus' },
+             { id: 'qwen-turbo', label: 'Qwen Turbo' }] },
+  { key: 'moonshot', label: '月之暗面',   endpoint: 'https://api.moonshot.cn/v1/chat/completions',
+    models: [{ id: 'moonshot-v1-8k',  label: 'Moonshot v1 8K' },
+             { id: 'moonshot-v1-32k', label: 'Moonshot v1 32K' },
+             { id: 'moonshot-v1-128k',label: 'Moonshot v1 128K' }] },
+  { key: 'mimo',     label: 'mimo',       endpoint: 'https://token-plan-cn.xiaomimimo.com/v1/chat/completions',
+    models: [{ id: 'mimo-v2.5-pro', label: 'V2.5 Pro' }] }
+];
+
+function getUserLLMConfig() {
+  var all = {};
+  try { all = JSON.parse(localStorage.getItem('jd-llm-config') || '{}'); } catch(e) {}
+  var active = all.active || '';
+  var cfg = (active && all.providers && all.providers[active]) ? all.providers[active] : {};
+  return {
+    active: active,
+    model:    cfg.model    || '',
+    endpoint: cfg.endpoint || '',
+    apiKey:   cfg.apiKey   || ''
+  };
+}
+function saveUserLLMConfig(cfg) {
+  var all = {};
+  try { all = JSON.parse(localStorage.getItem('jd-llm-config') || '{}'); } catch(e) {}
+  if (!all.providers) all.providers = {};
+  all.active = cfg.active || all.active;
+  all.providers[all.active] = {
+    model: cfg.model || '',
+    endpoint: cfg.endpoint || '',
+    apiKey: cfg.apiKey || ''
+  };
+  localStorage.setItem('jd-llm-config', JSON.stringify(all));
+}
+
+// ── LLM 配置（从 localStorage 用户配置读取） ──
+var LLM_CONFIG = {
+  get model() { return getUserLLMConfig().model; },
   temperature: 0.85,
-  maxTokens: 4000
+  maxTokens: 6000  // 30条标题需要足够输出空间
 };
 
 // ── System Prompt ──
-const SYSTEM_PROMPT = `【角色设定】
+const SYSTEM_PROMPT = `(输出JSON)\n【角色设定】
 你是一位资深的"京东逛逛"内容运营专家。你的目标受众是具有强购买意愿、注重产品品质与实用性的京东用户。你的任务是根据提供的【产品参数/卖点】，生成能够精准截流站内搜索、加速用户决策的"高点击、高转化"种草标题。
 
 【参数转化三步法】
@@ -54,10 +112,10 @@ const SYSTEM_PROMPT = `【角色设定】
 - 摒弃无效营销词：严禁使用"绝绝子、yyds、闭眼入、仙女必备"等浮夸词汇
 
 【字数要求】
-每条标题必须在27字以内（包含标点符号、数字、emoji等所有字符）。请严格控制字数。
+每条标题严格控制在25字以内（包含标点符号、数字、emoji等所有字符）。请逐字数清楚。
 
 【输出结构要求】
-请从以下三种京东高转化结构中生成10条标题（A结构3条、B结构4条、C结构3条），每条都要不同，不要重复：
+请从以下三种京东高转化结构中生成30条标题（A结构9条、B结构12条、C结构9条），每条都要不同，不要重复：
 
 结构A（避坑防御型）：[直击痛点/劣质平替的坑] + [品类热搜词] + [靠谱结果]
 范例：别再用酒店脏水壶了！自带折叠即热饮水机，差旅随时喝上干净温水。
@@ -68,41 +126,41 @@ const SYSTEM_PROMPT = `【角色设定】
 结构C（痛点反转型）：[使用前的烦恼] + [品类热搜词] + [获得的使用体验]
 范例：租房嫌烧水慢？工位放台小型即热饮水机，5档控温拯救挑剔胃。
 
+【数量强制要求】
+你必须输出恰好30条标题！A9条、B12条、C9条。少一条视为不合格。
+
 【输出格式】
-严格按以下JSON格式输出，不要输出其他内容：
-{
-  "titles": [
-    {"structure": "A", "title": "标题内容1"},
-    {"structure": "A", "title": "标题内容2"},
-    {"structure": "A", "title": "标题内容3"},
-    {"structure": "B", "title": "标题内容4"},
-    {"structure": "B", "title": "标题内容5"},
-    {"structure": "B", "title": "标题内容6"},
-    {"structure": "B", "title": "标题内容7"},
-    {"structure": "C", "title": "标题内容8"},
-    {"structure": "C", "title": "标题内容9"},
-    {"structure": "C", "title": "标题内容10"}
-  ]
-}`;
+{"titles":[{"structure":"A","title":"标题1"},{"structure":"A","title":"标题2"},{"structure":"A","title":"标题3"},{"structure":"A","title":"标题4"},{"structure":"A","title":"标题5"},{"structure":"A","title":"标题6"},{"structure":"A","title":"标题7"},{"structure":"A","title":"标题8"},{"structure":"A","title":"标题9"},{"structure":"B","title":"标题10"},{"structure":"B","title":"标题11"},{"structure":"B","title":"标题12"},{"structure":"B","title":"标题13"},{"structure":"B","title":"标题14"},{"structure":"B","title":"标题15"},{"structure":"B","title":"标题16"},{"structure":"B","title":"标题17"},{"structure":"B","title":"标题18"},{"structure":"B","title":"标题19"},{"structure":"B","title":"标题20"},{"structure":"B","title":"标题21"},{"structure":"C","title":"标题22"},{"structure":"C","title":"标题23"},{"structure":"C","title":"标题24"},{"structure":"C","title":"标题25"},{"structure":"C","title":"标题26"},{"structure":"C","title":"标题27"},{"structure":"C","title":"标题28"},{"structure":"C","title":"标题29"},{"structure":"C","title":"标题30"}]}`;
 
 // ── 调用 LLM API ──
 async function callLLM(systemPrompt, userMessage) {
-  if (!LLM_CONFIG.model) {
-    throw new Error('LLM 模型未配置，请检查 config.json');
+  var cfg = getUserLLMConfig();
+  if (!cfg.model) {
+    throw new Error('LLM 模型未配置，请在下方选择模型并填写 API Key');
   }
+  if (!cfg.apiKey) {
+    throw new Error('请填写 LLM API Key');
+  }
+
+  // 按服务商预设合并特殊参数（如 JSON 模式、思考模式关闭等）
+  var preset = LLM_PRESETS.find(function(p) { return p.key === cfg.active; });
+  var extraOpts = (preset && preset.opts) ? preset.opts : {};
+  var body = Object.assign({
+    model: cfg.model,
+    endpoint: cfg.endpoint,
+    apiKey: cfg.apiKey,
+    temperature: LLM_CONFIG.temperature,
+    maxTokens: LLM_CONFIG.maxTokens,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userMessage }
+    ]
+  }, extraOpts);
 
   const res = await fetch('/api/llm', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: LLM_CONFIG.model,
-      temperature: LLM_CONFIG.temperature,
-      maxTokens: LLM_CONFIG.maxTokens,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userMessage }
-      ]
-    })
+    body: JSON.stringify(body)
   });
 
   if (!res.ok) {
@@ -113,8 +171,10 @@ async function callLLM(systemPrompt, userMessage) {
   const data = await res.json();
   if (data.error) throw new Error(`LLM API 错误: ${data.error.message || JSON.stringify(data.error)}`);
 
-  const content = data.choices?.[0]?.message?.content;
-  if (!content) throw new Error('LLM 返回内容为空');
+  // DeepSeek V4 默认 thinking 模式，需取 content + reasoning_content
+  const msg = data.choices?.[0]?.message || {};
+  const content = msg.content || msg.reasoning_content || '';
+  if (!content.trim()) throw new Error('LLM 返回内容为空');
 
   return content;
 }
@@ -156,7 +216,7 @@ function buildUserMessage(product, analysis) {
     }
   }
 
-  parts.push('\n请根据以上信息，按照System Prompt中的参数转化三步法和三种结构要求，生成10条京东逛逛种草标题。每条标题必须在27字以内（含标点数字）。');
+  parts.push('\n请根据以上信息，按照System Prompt中的参数转化三步法和三种结构要求，生成30条京东逛逛种草标题。每条标题严格控制在25字以内（含标点数字）。');
 
   return parts.join('\n');
 }
@@ -183,107 +243,107 @@ function validateTitle(title) {
 
 // ── 解析 LLM 返回的 JSON ──
 function parseLLMResponse(content) {
-  // 尝试直接解析 JSON
-  try {
-    const json = JSON.parse(content);
-    if (json.titles && Array.isArray(json.titles)) return json.titles;
-  } catch {}
+  var extractText = function(s) { return s; };
 
-  // 尝试从 markdown 代码块中提取 JSON
-  const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (codeBlockMatch) {
-    try {
-      const json = JSON.parse(codeBlockMatch[1].trim());
-      if (json.titles && Array.isArray(json.titles)) return json.titles;
-    } catch {}
+  // 尝试直接解析
+  var parsed = null;
+  try { parsed = JSON.parse(content); } catch(e) {}
+  // 尝试 markdown 代码块
+  if (!parsed) {
+    var m = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (m) try { parsed = JSON.parse(m[1].trim()); } catch(e) {}
+  }
+  // 尝试提取 JSON 块
+  if (!parsed) {
+    var jm = content.match(/[\[{][\s\S]*[\]}]/);
+    if (jm) try { parsed = JSON.parse(jm[0]); } catch(e) {}
   }
 
-  // 尝试提取 { ... } 块
-  const jsonMatch = content.match(/\{[\s\S]*"titles"[\s\S]*\}/);
-  if (jsonMatch) {
-    try {
-      const json = JSON.parse(jsonMatch[0]);
-      if (json.titles && Array.isArray(json.titles)) return json.titles;
-    } catch {}
-  }
-
-  // 兜底：按行提取
-  const lines = content.split('\n').map(l => l.trim()).filter(l => l.length > 8 && l.length <= 27);
-  if (lines.length >= 3) {
-    return lines.slice(0, 10).map((title, i) => ({
-      structure: ['A', 'A', 'A', 'B', 'B', 'B', 'B', 'C', 'C', 'C'][i] || 'B',
-      title: title.replace(/^\d+[\.\)、]\s*/, '').replace(/^["""]|["""]$/g, '')
-    }));
+  if (parsed) {
+    // {"titles":[...]} 格式
+    if (parsed.titles && Array.isArray(parsed.titles)) return parsed.titles;
+    // 纯数组格式 [{title:"..."},...]
+    if (Array.isArray(parsed)) return parsed;
   }
 
   throw new Error('无法解析 LLM 返回内容');
 }
 
-// ── 主生成函数（并行调用所有型号） ──
+// ── 主生成函数（每个型号一次LLM调用，15条取10条，5个型号并行） ──
 async function generateAll(analysis, userInput) {
   // 构建产品数据
-  const products = {};
+  var products = {};
   if (typeof KNOWLEDGE_BASE !== 'undefined') {
-    for (const [model, info] of Object.entries(KNOWLEDGE_BASE.models)) {
+    for (var model in KNOWLEDGE_BASE.models) {
+      var info = KNOWLEDGE_BASE.models[model];
       products[model] = {
-        model,
+        model: model,
         brand: KNOWLEDGE_BASE.brand.nameCn,
         name: info.name,
-        sellingPoints: [...info.sellingPoints],
-        scenes: [...info.scenes],
-        人群: [...info.audience]
+        sellingPoints: info.sellingPoints.slice(),
+        scenes: info.scenes.slice(),
+        人群: info.audience.slice()
       };
     }
   }
 
-  // 用户自定义覆盖
   if (userInput.customProduct) {
-    const cp = userInput.customProduct;
-    for (const m of Object.keys(products)) {
+    var cp = userInput.customProduct;
+    for (var m in products) {
       if (cp.name) products[m].name = cp.name;
-      if (cp.sellingPoints?.length) products[m].sellingPoints = cp.sellingPoints;
-      if (cp.scenes?.length) products[m].scenes = cp.scenes;
-      if (cp.人群?.length) products[m].人群 = cp.人群;
+      if (cp.sellingPoints && cp.sellingPoints.length) products[m].sellingPoints = cp.sellingPoints;
+      if (cp.scenes && cp.scenes.length) products[m].scenes = cp.scenes;
+      if (cp.人群 && cp.人群.length) products[m].人群 = cp.人群;
     }
   }
 
-  let targetModels = Object.keys(products);
+  var targetModels = Object.keys(products);
   if (userInput.model && products[userInput.model]) targetModels = [userInput.model];
 
-  // 并行调用所有型号的 LLM API
-  const modelPromises = targetModels.map(async (model) => {
-    const product = products[model];
-    const userMessage = buildUserMessage(product, analysis);
+  // 精简 Prompt（去掉冗长的 SYSTEM_PROMPT，每个调用自己带）
+  var prompt = SYSTEM_PROMPT;
 
-    try {
-      const rawContent = await callLLM(SYSTEM_PROMPT, userMessage);
-      const parsedTitles = parseLLMResponse(rawContent);
+  var modelPromises = targetModels.map(function(model) {
+    var product = products[model];
+    var userMessage = buildUserMessage(product, analysis);
 
-      const titles = parsedTitles
-        .map(t => ({
-          title: (t.title || '').replace(/["""]|["""]$/g, '').trim(),
-          structure: t.structure || '',
-          words: (t.title || '').replace(/[\s]/g, '').length
-        }))
-        .filter(t => validateTitle(t.title))
-        .map(t => ({
-          ...t,
-          reasoning: `结构${t.structure} · LLM生成`
-        }));
-
-      const strategy = `大模型生成（${LLM_CONFIG.model}）\n  · 品类热搜词：${getCategoryKW(product.name)}\n  · 生成规则：A避坑防御(3条) / B效率提升(4条) / C痛点反转(3条)\n  · 字数限制：27字内（含标点数字）\n  · 禁止品牌词 + 禁止浮夸词 + 参数事实合规`;
-
-      return { model, result: { product, titles, strategy } };
-    } catch (e) {
-      return { model, result: { product, titles: [], strategy: '', error: e.message } };
+    // 偶发空响应时重试一次
+    function tryCallLLM(retry) {
+      return callLLM(prompt, userMessage).catch(function(e) {
+        if (retry && e.message === 'LLM 返回内容为空') return callLLM(prompt, userMessage);
+        throw e;
+      });
     }
+    return tryCallLLM(true).then(function(raw) {
+      var parsed = parseLLMResponse(raw);
+      // 自动推断缺失的 structure 字段（按 9A+12B+9C 顺序，与 Prompt 一致）
+      var structureOrder = [];
+      for (var s = 0; s < 9; s++) structureOrder.push('A');
+      for (var s = 0; s < 12; s++) structureOrder.push('B');
+      for (var s = 0; s < 9; s++) structureOrder.push('C');
+      var valid = parsed
+        .map(function(t, i) {
+          return { title: (t.title||'').replace(/["""]|["""]$/g,'').trim(), structure: t.structure || structureOrder[i] || 'B', words: (t.title||'').replace(/[\s]/g,'').length };
+        })
+        .filter(function(t){ return validateTitle(t.title); });
+      // 30条中按结构取：A取3 B取4 C取3
+      var picked = [].concat(
+        valid.filter(function(t){return t.structure==='A'}).slice(0,3),
+        valid.filter(function(t){return t.structure==='B'}).slice(0,4),
+        valid.filter(function(t){return t.structure==='C'}).slice(0,3)
+      );
+      var titles = picked.map(function(t){ return { title: t.title, structure: t.structure, words: t.words, reasoning: '结构'+t.structure+' · LLM生成' }; });
+      var strategy = '大模型生成（'+LLM_CONFIG.model+'）\n  · 品类热搜词：'+getCategoryKW(product.name)+'\n  · 生成规则：A避坑防御(3条) / B效率提升(4条) / C痛点反转(3条)\n  · 字数限制：27字内（含标点数字）\n  · 禁止品牌词 + 禁止浮夸词 + 参数事实合规';
+      return { model: model, result: { product: product, titles: titles, strategy: strategy } };
+    }).catch(function(e) {
+      return { model: model, result: { product: product, titles: [], strategy: '', error: e.message } };
+    });
   });
 
-  const results = await Promise.all(modelPromises);
-  const allResults = {};
-  for (const { model, result } of results) {
-    allResults[model] = result;
+  var results = await Promise.all(modelPromises);
+  var allResults = {};
+  for (var i = 0; i < results.length; i++) {
+    allResults[results[i].model] = results[i].result;
   }
-
   return allResults;
 }

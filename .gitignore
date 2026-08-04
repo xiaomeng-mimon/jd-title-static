@@ -3,3 +3,4 @@ config.json
 admin.html
 cache/
 *.log
+approved.json

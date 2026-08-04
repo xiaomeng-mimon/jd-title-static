@@ -6,7 +6,18 @@ function hideLoading() { document.getElementById('loading').style.display = 'non
 function setStepStatus(id, cls, text) { const el = document.getElementById(id); el.className = 'step-status ' + cls; el.textContent = text; }
 
 // ── 本地数据聚合工具（替代 data/query API） ──
-function normalizeDate(str) { if (!str) return ''; return String(str).replace(/\//g, '-').substring(0, 10); }
+function normalizeDate(str) {
+  if (!str && str !== 0) return '';
+  var s = String(str).replace(/\//g, '-').trim();
+  // 处理 Unix 时间戳（毫秒或秒）
+  if (/^\d{10,13}$/.test(s)) {
+    var ts = parseInt(s, 10);
+    if (ts > 1e12) ts = Math.floor(ts / 1000); // 毫秒 → 秒
+    var d = new Date(ts * 1000);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  return s.substring(0, 10);
+}
 
 function filterAndAggregate(records, dateRange) {
   const { start, end } = dateRange || {};
@@ -115,62 +126,126 @@ document.addEventListener('click', (e) => {
   if (!e.target.closest('#baseUrl') && !e.target.closest('#hist-dropdown')) { document.getElementById('hist-dropdown').classList.remove('show'); }
 });
 
-// ── 认证 ──
-async function handleAuth() {
-  const baseUrl = document.getElementById('baseUrl').value.trim();
-  if (!baseUrl) { alert('请输入飞书链接'); return; }
-
-  // OAuth 登录 → 从服务端获取 token
+// ── 自动初始化：OAuth 登录成功后自动获取 token ──
+(function autoInit() {
   if (window._oauthAuthed && !getToken()) {
-    showLoading('正在获取 Token...');
-    try {
-      await initOAuthToken();
-      document.getElementById('auth-status').className = 'step-status done';
-      document.getElementById('auth-status').textContent = '已认证（飞书登录）';
-      document.getElementById('config-panel').style.display = 'block';
-      addHistory(baseUrl);
-    } catch (e) {
-      alert('Token 获取失败: ' + e.message);
-    } finally {
-      hideLoading();
-    }
-    return;
+    initOAuthToken().catch(function(e) { console.warn('自动获取 Token 失败:', e.message); });
   }
+  renderLLMConfig();
+})();
 
-  const manualToken = document.getElementById('manualToken').value.trim();
-  if (manualToken) {
-    setToken(manualToken);
-    document.getElementById('auth-status').className = 'step-status done';
-    document.getElementById('auth-status').textContent = '已认证（手动）';
-    document.getElementById('config-panel').style.display = 'block';
-    addHistory(baseUrl);
-    return;
+// ── LLM 配置 UI ──
+function renderLLMConfig() {
+  var cfg = getUserLLMConfig();
+  // 填充快捷按钮
+  var presetsDiv = document.getElementById('llm-presets');
+  if (presetsDiv) {
+    presetsDiv.innerHTML = '';
+    LLM_PRESETS.forEach(function(p) {
+      var btn = document.createElement('button');
+      btn.className = 'btn btn-secondary btn-sm';
+      if (cfg.active === p.key) btn.style.background = '#D4A574';
+      btn.textContent = p.label;
+      btn.onclick = function() { applyLLMPreset(p); };
+      presetsDiv.appendChild(btn);
+    });
   }
-
-  const appSecret = document.getElementById('appSecret').value.trim();
-  if (!appSecret) { alert('请输入 App Secret 或手动输入 Token'); return; }
-
-  showLoading('正在获取 Token...');
-  try {
-    await getTenantToken(appSecret);
-    document.getElementById('auth-status').className = 'step-status done';
-    document.getElementById('auth-status').textContent = '已认证';
-    document.getElementById('config-panel').style.display = 'block';
-    addHistory(baseUrl);
-  } catch (e) {
-    document.getElementById('auth-status').className = 'step-status error';
-    document.getElementById('auth-status').textContent = '认证失败';
-    alert('认证失败: ' + e.message);
-  } finally {
-    hideLoading();
+  document.getElementById('llm-endpoint').value = cfg.endpoint || '';
+  document.getElementById('llm-apikey').value = cfg.apiKey || '';
+  if (cfg.active) {
+    // 预设模式：显示下拉框
+    document.getElementById('llm-model-text').style.display = 'none';
+    document.getElementById('llm-model-select').style.display = 'block';
+    populateModelSelect(cfg.active, cfg.model);
+  } else {
+    // 自由模式：显示文本输入框
+    document.getElementById('llm-model-text').style.display = 'block';
+    document.getElementById('llm-model-select').style.display = 'none';
+    document.getElementById('llm-model-text').value = cfg.model || '';
   }
+  updateLLMHint(cfg);
+}
+
+function populateModelSelect(activeKey, savedModel) {
+  var sel = document.getElementById('llm-model-select');
+  sel.innerHTML = '<option value="">-- 选择模型 --</option>';
+  var preset = LLM_PRESETS.find(function(p) { return p.key === activeKey; });
+  if (!preset || !preset.models) return;
+  preset.models.forEach(function(m) {
+    var opt = document.createElement('option');
+    opt.value = m.id; opt.textContent = m.label + ' (' + m.id + ')';
+    if (m.id === savedModel) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
+function onLLMModelSelectChange() {
+  var all = {};
+  try { all = JSON.parse(localStorage.getItem('jd-llm-config') || '{}'); } catch(e) {}
+  var active = all.active;
+  if (!active) return;
+  if (!all.providers) all.providers = {};
+  if (!all.providers[active]) all.providers[active] = {};
+  all.providers[active].model = document.getElementById('llm-model-select').value;
+  localStorage.setItem('jd-llm-config', JSON.stringify(all));
+  updateLLMHint(getUserLLMConfig());
+}
+
+function applyLLMPreset(preset) {
+  // 读取该预设下之前保存的配置（含 API Key）
+  var all = {};
+  try { all = JSON.parse(localStorage.getItem('jd-llm-config') || '{}'); } catch(e) {}
+  var saved = (all.providers && all.providers[preset.key]) ? all.providers[preset.key] : {};
+  var model = saved.model || '';
+  var endpoint = saved.endpoint || preset.endpoint;
+  var apiKey = saved.apiKey || '';
+  document.getElementById('llm-endpoint').value = endpoint;
+  document.getElementById('llm-apikey').value = apiKey;
+  // 保存 active
+  if (!all.providers) all.providers = {};
+  all.active = preset.key;
+  all.providers[preset.key] = { model: model, endpoint: endpoint, apiKey: apiKey };
+  localStorage.setItem('jd-llm-config', JSON.stringify(all));
+  renderLLMConfig(); // 刷新按钮高亮 + 重建 model 下拉
+}
+
+function onLLMFieldChange() {
+  var all = {};
+  try { all = JSON.parse(localStorage.getItem('jd-llm-config') || '{}'); } catch(e) {}
+  var active = all.active;
+  if (!active) return;
+  if (!all.providers) all.providers = {};
+  if (!all.providers[active]) all.providers[active] = { model: '', endpoint: '', apiKey: '' };
+  var modelEl = document.getElementById('llm-model-select').style.display === 'none' ? document.getElementById('llm-model-text') : document.getElementById('llm-model-select');
+  all.providers[active].model = modelEl.value.trim();
+  all.providers[active].endpoint = document.getElementById('llm-endpoint').value.trim();
+  all.providers[active].apiKey = document.getElementById('llm-apikey').value.trim();
+  localStorage.setItem('jd-llm-config', JSON.stringify(all));
+  updateLLMHint(getUserLLMConfig());
+}
+
+function updateLLMHint(cfg) {
+  var el = document.getElementById('llm-hint');
+  if (!el) return;
+  var parts = [];
+  if (cfg.active) parts.push('当前: ' + cfg.active);
+  if (cfg.model) parts.push(cfg.model);
+  if (cfg.apiKey) {
+    parts.push('Key: ••••' + cfg.apiKey.slice(-4));
+    el.style.color = '#155724';
+  } else {
+    parts.push('未设置 API Key');
+    el.style.color = '#8B7355';
+  }
+  el.textContent = parts.join(' | ');
 }
 
 // ── 调试：查看原始字段名 ──
 async function handleDebugRecords() {
   const baseUrl = document.getElementById('baseUrl').value.trim();
   if (!baseUrl) { alert('请输入飞书链接'); return; }
-  if (!getToken()) { alert('请先完成认证'); return; }
+  // 确保 token 已获取
+  if (!getToken()) { try { await initOAuthToken(); } catch (e) { alert('Token 获取失败: ' + e.message); return; } }
   const debugEl = document.getElementById('debug-output');
   debugEl.style.display = 'block';
   debugEl.textContent = '正在获取...';
@@ -197,7 +272,8 @@ async function handleDebugRecords() {
 async function handleAnalyze() {
   const baseUrl = document.getElementById('baseUrl').value.trim();
   if (!baseUrl) { alert('请输入飞书链接'); return; }
-  if (!getToken()) { alert('请先完成认证'); return; }
+  // 确保 token 已获取
+  if (!getToken()) { try { await initOAuthToken(); } catch (e) { alert('Token 获取失败: ' + e.message); return; } }
 
   const btn = document.getElementById('btn-analyze');
   btn.disabled = true;

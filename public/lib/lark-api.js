@@ -20,20 +20,6 @@ async function feishuApi(method, path, body, params) {
   return data.data;
 }
 
-async function getTenantToken(appSecret) {
-  const res = await fetch('/api/proxy?target=' + encodeURIComponent('/open-apis/auth/v3/tenant_access_token/internal'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ app_id: getAppId(), app_secret: appSecret })
-  });
-  const data = await res.json();
-  if (data.code !== 0) throw new Error('获取 token 失败: ' + (data.msg || JSON.stringify(data)));
-  accessToken = data.tenant_access_token;
-  return accessToken;
-}
-
-function setToken(token) { accessToken = token; }
-
 // OAuth 登录后从服务端获取 token
 async function initOAuthToken() {
   const res = await fetch('/api/feishu-token');

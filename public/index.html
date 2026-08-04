@@ -16,7 +16,14 @@
     <!-- 认证状态 -->
     <section class="card" id="auth-panel">
       <h3><span class="step-badge">🔐</span> 身份认证 <span class="step-status" id="auth-status">未认证</span></h3>
-      <p style="font-size:13px;color:#8B7355;margin-bottom:12px;">输入 App Secret 获取 Token，或手动粘贴已有 Token</p>
+      <p style="font-size:13px;color:#8B7355;margin-bottom:8px;">通过飞书 OAuth 自动登录认证</p>
+      <button class="btn btn-secondary" onclick="handleDebugRecords()" style="font-size:12px;">调试：查看字段名</button>
+      <pre id="debug-output" style="margin-top:8px;background:#f5f5f5;padding:8px;font-size:11px;max-height:300px;overflow:auto;display:none;border-radius:4px;"></pre>
+    </section>
+
+    <!-- 分析配置 -->
+    <section class="card" id="config-panel" style="display:none;">
+      <h3><span class="step-badge">⚙️</span> 分析配置</h3>
       <div class="input-row">
         <div class="input-group">
           <label>飞书链接</label>
@@ -26,37 +33,43 @@
           </div>
         </div>
       </div>
-      <div class="input-row">
-        <div class="input-group">
-          <label>App Secret</label>
-          <input type="password" id="appSecret" placeholder="在飞书开发者后台 → 凭证与基础信息中获取" />
-        </div>
-      </div>
-      <details style="margin:8px 0;"><summary style="cursor:pointer;font-size:13px;color:#8B7355;">或手动输入 Token</summary>
-        <div class="input-group" style="margin-top:8px;">
-          <label>Token</label>
-          <input type="text" id="manualToken" placeholder="user_access_token 或 tenant_access_token" />
-        </div>
-      </details>
-      <button class="btn btn-primary" id="btn-auth" onclick="handleAuth()">认证并开始</button>
-      <button class="btn btn-secondary" onclick="handleDebugRecords()" style="margin-left:8px;font-size:12px;">调试：查看字段名</button>
-      <pre id="debug-output" style="margin-top:8px;background:#f5f5f5;padding:8px;font-size:11px;max-height:300px;overflow:auto;display:none;border-radius:4px;"></pre>
-    </section>
-
-    <!-- 分析配置 -->
-    <section class="card" id="config-panel" style="display:none;">
-      <h3><span class="step-badge">⚙️</span> 分析配置</h3>
       <div class="date-range">
         <div class="input-group">
           <label>开始日期（可选）</label>
-          <input type="text" id="date-start" placeholder="2026/05/01" />
+          <input type="date" id="date-start" />
         </div>
         <div class="input-group">
           <label>结束日期（可选）</label>
-          <input type="text" id="date-end" placeholder="2026/05/15" />
+          <input type="date" id="date-end" />
         </div>
       </div>
       <div class="hint">留空则使用全部数据；填写后分析仅统计该日期范围内的记录</div>
+      <div style="margin-top:16px;" id="llm-config-details">
+        <div style="font-size:13px;color:#8B7355;margin-bottom:6px;">🤖 LLM 配置（用于标题生成）</div>
+        <div>
+          <div style="margin-bottom:4px;font-size:12px;color:#8B7355;">快捷填充：</div>
+          <div id="llm-presets" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;"></div>
+          <div class="input-row">
+            <div class="input-group">
+              <label>Model</label>
+              <input type="text" id="llm-model-text" placeholder="模型名，如 hermes-v3、gpt-4o" onchange="onLLMFieldChange()" autocomplete="off" style="display:block;" />
+              <select id="llm-model-select" onchange="onLLMModelSelectChange()" style="display:none;width:100%;padding:10px 14px;border:1px solid #D4A574;border-radius:8px;font-size:14px;background:#FFF;color:#4A3728;outline:none;">
+                <option value="">-- 选择模型 --</option>
+              </select>
+            </div>
+            <div class="input-group">
+              <label>API Key</label>
+              <input type="password" id="llm-apikey" placeholder="sk-xxx" onchange="onLLMFieldChange()" />
+            </div>
+          </div>
+          <div class="input-group" style="margin-top:8px;">
+            <label>Endpoint（API地址）</label>
+            <input type="text" id="llm-endpoint" placeholder="https://api.xxx.com/v1/chat/completions" onchange="onLLMFieldChange()" />
+          </div>
+          <div class="hint" id="llm-hint" style="margin-top:4px;"></div>
+          <div style="margin-top:4px;font-size:11px;"><a href="javascript:localStorage.removeItem('jd-llm-config');location.reload();" style="color:#c62828;">清除 LLM 配置</a></div>
+        </div>
+      </div>
       <div style="margin-top:16px;">
         <button class="btn btn-primary" id="btn-analyze" onclick="handleAnalyze()">开始分析</button>
       </div>

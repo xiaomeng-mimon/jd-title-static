@@ -499,26 +499,35 @@ http.createServer(async (req, res) => {
     return;
   }
 
-  // /api/llm
+  // /api/llm（优先用前端传的 endpoint/apiKey，否则用服务器配置）
   if (parsed.pathname === '/api/llm') {
     try {
       const body = await parseBody(req);
-      if (!CONFIG.llm_endpoint || !CONFIG.llm_api_key) {
-        res.writeHead(500); res.end(JSON.stringify({ error: { message: 'LLM 未配置' } })); return;
+      // 前端传了 endpoint 就用前端完整配置，否则用服务器默认
+      console.log("[LLM]", body.model || "?", "->", (body.endpoint || "server").substring(0,50), "| key:", body.apiKey ? "***" + body.apiKey.slice(-4) : "(未填)");
+      const useServerDefault = !body.endpoint;
+      const endpoint = body.endpoint || CONFIG.llm_endpoint || "";
+      const apiKey = body.apiKey || (useServerDefault ? CONFIG.llm_api_key || "" : "");
+      if (!endpoint || !apiKey) {
+        res.writeHead(500); res.end(JSON.stringify({ error: { message: 'LLM 未配置，请填写所选模型的 API Key' } })); return;
       }
-      const llmUrl = new URL(CONFIG.llm_endpoint);
+      const llmUrl = new URL(endpoint);
       const result = await new Promise((resolve, reject) => {
         const r = https.request({
           hostname: llmUrl.hostname, port: llmUrl.port || 443, path: llmUrl.pathname, method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${CONFIG.llm_api_key}`
+            'Authorization': `Bearer ${apiKey}`
           }
         }, res2 => { let d = ''; res2.on('data', c => d += c); res2.on('end', () => resolve(d)); });
         r.on('error', reject);
-        r.write(JSON.stringify({ model: body.model, messages: body.messages, temperature: body.temperature, max_tokens: body.maxTokens }));
+        var llmPayload = { model: body.model, messages: body.messages, temperature: body.temperature, max_tokens: body.maxTokens };
+        if (body.thinking !== undefined) llmPayload.thinking = body.thinking;
+        if (body.response_format) llmPayload.response_format = body.response_format;
+        r.write(JSON.stringify(llmPayload));
         r.end();
       });
+      try { var obj = JSON.parse(result); var content = ((obj.choices||[])[0]||{}).message?.content || ''; var parsed = (function(c){try{var j=JSON.parse(c);return (j.titles||j).length}catch(e){return -1}})(content); console.log('[LLM] 解析条数:', parsed, '| 内容长度:', content.length); } catch(e) { console.log('[LLM] 原始:', result.substring(0, 300)); }
       res.writeHead(200, { ...CT_JSON, 'Access-Control-Allow-Origin': '*' });
       res.end(result);
     } catch (e) {
