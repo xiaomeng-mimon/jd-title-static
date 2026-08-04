@@ -527,7 +527,6 @@ http.createServer(async (req, res) => {
         r.write(JSON.stringify(llmPayload));
         r.end();
       });
-      try { var obj = JSON.parse(result); var content = ((obj.choices||[])[0]||{}).message?.content || ''; var parsed = (function(c){try{var j=JSON.parse(c);return (j.titles||j).length}catch(e){return -1}})(content); console.log('[LLM] 解析条数:', parsed, '| 内容长度:', content.length); } catch(e) { console.log('[LLM] 原始:', result.substring(0, 300)); }
       res.writeHead(200, { ...CT_JSON, 'Access-Control-Allow-Origin': '*' });
       res.end(result);
     } catch (e) {
