@@ -60,23 +60,10 @@ function saveCachedRecords(tableId, records, total) {
   saveCacheMeta(meta);
 }
 
-// 探测飞书表记录总数（只拉 1 条，取 total）
-async function probeRecordTotal(baseToken, tableId) {
-  try {
-    const t = await getTenantToken();
-    const data = await feishuReq('GET',
-      `/open-apis/bitable/v1/apps/${baseToken}/tables/${tableId}/records?page_size=1`, null, t);
-    if (data.code === 0 && data.data) {
-      return { total: data.data.total || 0, hasMore: data.data.has_more };
-    }
-  } catch (e) { console.warn('probeRecordTotal failed:', e.message); }
-  return null;
-}
-
-// 全量拉取所有记录（分页，存缓存）
-async function fetchAllRecords(baseToken, tableId) {
+// 单次分页拉取
+async function fetchRecordsOnce(baseToken, tableId) {
   const t = await getTenantToken();
-  const allRecords = [];
+  const all = [];
   let pageToken = null;
   while (true) {
     const qs = `page_size=200${pageToken ? '&page_token=' + pageToken : ''}`;
@@ -90,14 +77,29 @@ async function fetchAllRecords(baseToken, tableId) {
         flat[k] = typeof v === 'object' && v !== null && 'value' in v ? v : { value: v };
       }
       flat['record_id'] = { value: item.record_id };
-      allRecords.push(flat);
+      all.push(flat);
     }
-    if (!data.data.has_more) {
-      saveCachedRecords(tableId, allRecords, data.data.total || allRecords.length);
-      return allRecords;
-    }
+    if (!data.data.has_more) break;
     pageToken = data.data.page_token;
   }
+  return all;
+}
+
+// 双重拉取合并去重，消除分页漂移
+async function fetchAllRecords(baseToken, tableId) {
+  const [batch1, batch2] = await Promise.all([
+    fetchRecordsOnce(baseToken, tableId),
+    fetchRecordsOnce(baseToken, tableId)
+  ]);
+  const seen = new Set();
+  const merged = batch1.concat(batch2).filter(r => {
+    const id = r.record_id?.value;
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+  saveCachedRecords(tableId, merged, merged.length);
+  return merged;
 }
 
 const sessions = new Map();
@@ -178,7 +180,6 @@ async function getAppOwnerId() {
 
 // 部门查询
 async function getDepartment(openId, userToken) {
-  // 用用户 token 调通讯录 API（需 contact:user:search 用户身份权限，跟 jd-promotion-analyzer 一致）
   if (userToken) {
     try {
       const d = await feishuReq('GET',
@@ -191,7 +192,6 @@ async function getDepartment(openId, userToken) {
     } catch (e) { console.error('[部门] 用户token方式失败:', e.message); }
   }
 
-  // 备用：租户 token（需 contact:contact:readonly 应用身份权限）
   try {
     const t = await getTenantToken();
     const d = await feishuReq('GET',
@@ -266,31 +266,24 @@ async function proxyWithRetry(feishuPath, method, headers, body, retries = 3) {
 // ── Router ──
 const router = {
 
-  // ── OAuth 验证 ──
   'POST /api/auth/verify': async (req, res) => {
     try {
       const body = await parseBody(req);
       if (!body.code) { sendJSON(res, 400, { ok: false, error: '缺少 code' }); return; }
-      // 1. app_access_token
       const appToken = await getAppToken();
-      // 2. code 换 user token
       const uData = await feishuReq('POST', '/open-apis/authen/v1/access_token',
         { grant_type: 'authorization_code', code: body.code }, appToken);
       if (uData.code !== 0 || !uData.data) throw new Error(uData.msg || 'code 无效');
-      // 3. 拿用户信息
       const iData = await feishuReq('GET', '/open-apis/authen/v1/user_info', null, uData.data.access_token);
       if (iData.code !== 0 || !iData.data) throw new Error('用户信息获取失败');
       const openId = iData.data.open_id;
       const userName = iData.data.name;
-      // 4. 获取部门（用用户 token，走 contact:user:search 权限）
       let department = '';
       try { department = await getDepartment(openId, uData.data.access_token); } catch (e) { /* ignore */ }
-      // 5. 创建 session（应用所有者自动通过）
       const appOwner = await getAppOwnerId();
       const isOwner = (openId === appOwner);
       const approved = isOwner || isApproved(openId);
       if (isOwner && !isApproved(openId)) { approveUser(openId, userName, department); }
-      // 已通过用户每次登录时更新部门信息
       if (approved && department) {
         const a = loadApproved();
         if (a[openId] && !a[openId].department) {
@@ -306,7 +299,6 @@ const router = {
     } catch (e) { sendJSON(res, 500, { ok: false, error: e.message }); }
   },
 
-  // ── 权限申请 ──
   'POST /api/auth/request': async (req, res) => {
     try {
       const body = await parseBody(req);
@@ -319,7 +311,6 @@ const router = {
     } catch (e) { sendJSON(res, 500, { ok: false, error: e.message }); }
   },
 
-  // ── 审批状态 ──
   'GET /api/auth/status': async (req, res) => {
     const parsed = new URL(req.url, 'http://localhost');
     const openId = parsed.searchParams.get('openId');
@@ -327,7 +318,6 @@ const router = {
     sendJSON(res, 200, { approved: isApproved(openId) });
   },
 
-  // ── 审批操作（卡片按钮回调） ──
   'GET /api/approve': async (req, res) => {
     const parsed = new URL(req.url, 'http://localhost');
     const openId = parsed.searchParams.get('openId');
@@ -350,7 +340,6 @@ const router = {
     res.end(html);
   },
 
-  // ── 审批执行（管理页调用） ──
   'POST /api/approve': async (req, res) => {
     const body = await parseBody(req);
     const { openId, userName, action } = body;
@@ -367,7 +356,6 @@ const router = {
     sendJSON(res, 200, { ok: true });
   },
 
-  // ── 权限管理（仅所有者） ──
   'GET /api/admin/users': async (req, res) => {
     const tok = req.headers['x-auth-token'] || '';
     const session = sessions.get(tok);
@@ -377,7 +365,6 @@ const router = {
     sendJSON(res, 200, { ok: true, users: loadApproved(), pending });
   },
 
-  // ── 撤销权限 ──
   'POST /api/admin/revoke': async (req, res) => {
     try {
       const tok = req.headers['x-auth-token'] || '';
@@ -393,7 +380,6 @@ const router = {
     } catch (e) { sendJSON(res, 500, { ok: false, error: e.message }); }
   },
 
-  // ── 服务端飞书 Token（供前端 API 调用） ──
   'GET /api/feishu-token': async (req, res) => {
     try {
       const token = await getTenantToken();
@@ -401,7 +387,6 @@ const router = {
     } catch (e) { sendJSON(res, 500, { error: e.message }); }
   },
 
-  // ── 前端配置 ──
   'GET /api/config': async (req, res) => {
     sendJSON(res, 200, {
       app_id: APP_ID,
@@ -409,32 +394,24 @@ const router = {
     });
   },
 
-  // ── 数据缓存读取（记忆机制）──
   'POST /api/cache/fetch-records': async (req, res) => {
     try {
       const body = await parseBody(req);
       const { baseToken, tableId } = body;
       if (!baseToken || !tableId) { sendJSON(res, 400, { ok: false, error: '缺少 baseToken 或 tableId' }); return; }
 
-      // 1. 探测远程记录总数
-      const probe = await probeRecordTotal(baseToken, tableId);
-      const remoteTotal = probe ? probe.total : null;
-
-      // 2. 检查本地缓存
+      // 有缓存直接返回
       const meta = loadCacheMeta();
       const cached = meta[tableId];
-      const cachedTotal = cached ? cached.total : 0;
-
-      // 3. 缓存命中（远程总数未变）→ 直接返回缓存
-      if (remoteTotal !== null && cachedTotal === remoteTotal && remoteTotal > 0) {
+      if (cached && cached.total > 0) {
         const records = loadCachedRecords(tableId);
         if (records) {
-          sendJSON(res, 200, { ok: true, fromCache: true, total: remoteTotal, records, cachedAt: cached.updatedAt });
+          sendJSON(res, 200, { ok: true, fromCache: true, total: cached.total, records, cachedAt: cached.updatedAt });
           return;
         }
       }
 
-      // 4. 缓存未命中或有新数据 → 全量拉取
+      // 无缓存 → 双重拉取合并去重
       const records = await fetchAllRecords(baseToken, tableId);
       sendJSON(res, 200, { ok: true, fromCache: false, total: records.length, records, cachedAt: new Date().toISOString() });
     } catch (e) {
@@ -442,7 +419,6 @@ const router = {
     }
   },
 
-  // ── 调试：查看原始记录字段名 ──
   'POST /api/debug-records': async (req, res) => {
     try {
       const body = await parseBody(req);
@@ -454,7 +430,6 @@ const router = {
     } catch (e) { sendJSON(res, 500, { ok: false, error: e.message }); }
   },
 
-  // ── 清除缓存 ──
   'POST /api/cache/invalidate': async (req, res) => {
     try {
       const body = await parseBody(req);
@@ -477,17 +452,14 @@ http.createServer(async (req, res) => {
   const parsed = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const k = `${req.method} ${parsed.pathname}`;
 
-  // Router
   if (router[k]) { await router[k](req, res); return; }
 
-  // /api/proxy
   if (parsed.pathname.startsWith('/api/proxy')) {
     const target = parsed.searchParams.get('target');
     if (!target) { res.writeHead(400); res.end('Missing target'); return; }
     try {
       const body = await parseBody(req);
       const authHeader = req.headers['x-feishu-token'] ? { 'Authorization': `Bearer ${req.headers['x-feishu-token']}` } : {};
-      // body 可能是 {body: ...} 包裹格式，也可能是直接 JSON（如 getTenantToken）
       const proxyBody = body.body ? JSON.stringify(body.body) : (Object.keys(body).length > 0 ? JSON.stringify(body) : null);
       const result = await proxyWithRetry(decodeURIComponent(target), req.method, authHeader, proxyBody);
       res.writeHead(200, { ...CT_JSON, 'Access-Control-Allow-Origin': '*' });
@@ -499,7 +471,6 @@ http.createServer(async (req, res) => {
     return;
   }
 
-  // /api/llm — 统一转发 xinmeiti 网关（员工自带Key或服务器兜底全走 xinmeiti）
   if (parsed.pathname === '/api/llm') {
     try {
       const body = await parseBody(req);
@@ -529,7 +500,6 @@ http.createServer(async (req, res) => {
     return;
   }
 
-  // OPTIONS
   if (req.method === 'OPTIONS') {
     res.writeHead(200, {
       'Access-Control-Allow-Origin': '*',
@@ -540,7 +510,6 @@ http.createServer(async (req, res) => {
     return;
   }
 
-  // 静态文件（public/）
   let p = parsed.pathname === '/' ? '/index.html' : parsed.pathname;
   const fp = path.join(ROOT, 'public', p);
   if (!fp.startsWith(path.join(ROOT, 'public'))) { res.writeHead(403); res.end(); return; }

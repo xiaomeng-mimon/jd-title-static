@@ -51,7 +51,8 @@ function filterAndAggregate(records, dateRange) {
 
   const byTitle = {};
   for (const r of filtered) {
-    const title = r['视频名称']?.value || '未知';
+    const title = (r['视频名称']?.value || '').trim();
+    if (!title) continue; // 过滤空标题
     const model = r['型号']?.value || '未知';
     const key = `${title}|||${model}`;
     if (!byTitle[key]) {

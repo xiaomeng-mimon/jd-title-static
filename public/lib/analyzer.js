@@ -102,10 +102,14 @@ function analyzeStructures(samples) {
 }
 
 function analyzeWordCount(samples) {
-  const counts = samples.map(r => { const t = r['视频名称']?.value || ''; return t.replace(/[\s💡✅～😭🥘❗🎁]/g, '').length; });
-  const sorted = [...counts].sort((a, b) => a - b);
-  const avg = counts.reduce((a, b) => a + b, 0) / counts.length;
-  return { avg: avg.toFixed(1), min: sorted[0], max: sorted[sorted.length - 1], p25: sorted[Math.floor(sorted.length * 0.25)], p75: sorted[Math.floor(sorted.length * 0.75)], all: counts };
+  const counts = samples.map(r => { const t = r['视频名称']?.value || ''; return { title: t.substring(0,30), len: t.replace(/[\s💡✅～😭🥘❗🎁]/g, '').length }; });
+  const lens = counts.map(c => c.len);
+  const sorted = [...lens].sort((a, b) => a - b);
+  const avg = lens.reduce((a, b) => a + b, 0) / lens.length;
+  // 调试：打印异常标题
+  var bad = counts.filter(function(c) { return c.len < 5 || c.len > 27; });
+  if (bad.length) console.warn('[字数异常]', bad.length, '条:', JSON.stringify(bad.slice(0,5)));
+  return { avg: avg.toFixed(1), min: sorted[0], max: sorted[sorted.length - 1], p25: sorted[Math.floor(sorted.length * 0.25)], p75: sorted[Math.floor(sorted.length * 0.75)], all: lens };
 }
 
 function classifyTitle(title) {
