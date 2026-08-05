@@ -5,7 +5,7 @@
 (async function(){
   var p=new URLSearchParams(location.search), code=p.get('code');
   if(!code){
-    location.href='https://open.feishu.cn/open-apis/authen/v1/authorize?app_id=cli_aae72d734df8dcbb&redirect_uri='+encodeURIComponent(location.origin+'/auth.html');
+    location.href='https://open.feishu.cn/open-apis/authen/v1/authorize?app_id=cli_aae72d734df8dcbb&scope=contact:contact.base:readonly&redirect_uri='+encodeURIComponent(location.origin+'/auth.html');
     return;
   }
   try{
