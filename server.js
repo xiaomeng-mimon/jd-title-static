@@ -181,18 +181,27 @@ async function getAppOwnerId() {
   } catch (e) { console.warn('getAppOwnerId failed:', e.message); return ownerCache || ''; }
 }
 
-// 部门查询（通过 lark-cli，与 jd-promotion-analyzer 一致）
-async function getDepartment(openId) {
+// 部门查询
+async function getDepartment(openId, userToken) {
+  if (userToken) {
+    try {
+      const d = await feishuReq('GET', `/open-apis/contact/v3/users/${openId}`, null, userToken);
+      if (d.code === 0 && d.data?.user?.department_ids?.length > 0) {
+        console.log('[部门] 获取成功:', d.data.user.department_ids.join(','));
+        return d.data.user.department_ids.join(',');
+      }
+      if (d.code !== 0) console.warn('[部门] 用户token查询失败:', d.code, d.msg);
+    } catch (e) { console.error('[部门] 用户token方式失败:', e.message); }
+  }
   try {
-    const { execSync } = require('child_process');
-    const stdout = execSync('lark-cli --as user contact +search-user --user-ids ' + openId, { encoding: 'utf8', maxBuffer: 1024 * 1024, timeout: 10000 });
-    const data = JSON.parse(stdout);
-    if (data.ok && data.data && data.data.users && data.data.users.length > 0) {
-      const dept = data.data.users[0].department || '';
-      if (dept) console.log('[部门] 获取成功:', dept);
-      return dept;
+    const t = await getTenantToken();
+    const d = await feishuReq('GET', `/open-apis/contact/v3/users/${openId}`, null, t);
+    if (d.code === 0 && d.data?.user?.department_ids?.length > 0) {
+      console.log('[部门] 租户token获取成功:', d.data.user.department_ids.join(','));
+      return d.data.user.department_ids.join(',');
     }
-  } catch (e) { console.error('[部门] lark-cli查询失败:', e.message); }
+    if (d.code !== 0) console.warn('[部门] 租户token查询失败:', d.code, d.msg);
+  } catch (e) { console.error('[部门] 租户token方式失败:', e.message); }
   return '';
 }
 
@@ -268,7 +277,7 @@ const router = {
       const openId = iData.data.open_id;
       const userName = iData.data.name;
       let department = '';
-      try { department = await getDepartment(openId); } catch (e) { /* ignore */ }
+      try { department = await getDepartment(openId, uData.data.access_token); } catch (e) { /* ignore */ }
       const appOwner = await getAppOwnerId();
       const isOwner = (openId === appOwner);
       const approved = isOwner || isApproved(openId);
