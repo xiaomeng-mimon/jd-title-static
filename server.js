@@ -229,10 +229,9 @@ async function sendApproveCard(userName, openId, department) {
     const content = '用户：' + userName + '\n' + (department ? '部门：' + department + '\n' : '') + '申请访问米萌标题智能运营';
     const parts = content.split('\n');
     const divs = parts.map(p => '{"tag":"div","text":{"tag":"lark_md","content":"' + p.replace(/"/g, '\\"') + '"}}').join(',');
-    const approveUrl = APP_URL + '/api/approve?openId=' + openId + '&userName=' + encodeURIComponent(userName) + '&action=approve';
-    const rejectUrl = APP_URL + '/api/approve?openId=' + openId + '&userName=' + encodeURIComponent(userName) + '&action=reject';
+    const adminUrl = APP_URL + '/admin.html';
     const card = '{"header":{"title":{"tag":"plain_text","content":"权限申请"},"template":"blue"},"elements":[' + divs +
-      ',{"tag":"action","actions":[{"tag":"button","text":{"tag":"plain_text","content":"通过"},"type":"primary","multi_url":{"url":"' + approveUrl + '"}},{"tag":"button","text":{"tag":"plain_text","content":"拒绝"},"type":"danger","multi_url":{"url":"' + rejectUrl + '"}}]}]}';
+      ',{"tag":"action","actions":[{"tag":"button","text":{"tag":"plain_text","content":"查看申请"},"type":"primary","multi_url":{"url":"' + adminUrl + '"}}]}]}';
     await feishuReq('POST', '/open-apis/im/v1/messages?receive_id_type=open_id',
       { receive_id: owner, msg_type: 'interactive', content: card }, await getTenantToken());
   } catch (e) { console.error('sendApproveCard failed:', e.message); }
