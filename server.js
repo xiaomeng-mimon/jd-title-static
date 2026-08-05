@@ -103,7 +103,10 @@ async function fetchAllRecords(baseToken, tableId) {
 }
 
 const sessions = new Map();
-const pendingRequests = new Map();
+const PENDING_PATH = path.join(ROOT, 'pending.json');
+
+function loadPending() { try { return JSON.parse(fs.readFileSync(PENDING_PATH, 'utf-8')); } catch { return {}; } }
+function savePending(data) { fs.writeFileSync(PENDING_PATH, JSON.stringify(data, null, 2)); }
 
 // ── 工具 ──
 function parseBody(req) {
@@ -304,7 +307,7 @@ const router = {
       const { openId, userName } = body;
       if (!openId || !userName) { sendJSON(res, 400, { ok: false, error: '参数不全' }); return; }
       if (isApproved(openId)) { sendJSON(res, 200, { ok: true, message: '你的权限已审批通过，请刷新页面' }); return; }
-      pendingRequests.set(openId, { userName, department: body.department || '', requestedAt: new Date().toISOString() });
+      var p = loadPending(); p[openId] = { userName, department: body.department || '', requestedAt: new Date().toISOString() }; savePending(p);
       sendApproveCard(userName, openId, body.department || '');
       sendJSON(res, 200, { ok: true, message: '已提交申请，等待管理员审批' });
     } catch (e) { sendJSON(res, 500, { ok: false, error: e.message }); }
@@ -324,8 +327,7 @@ const router = {
     const action = parsed.searchParams.get('action');
     if (!openId || !action) { res.writeHead(400, CT_HTML); res.end('<h2>参数错误</h2>'); return; }
     const isApprove = action === 'approve';
-    const reqInfo = pendingRequests.get(openId);
-    pendingRequests.delete(openId);
+    var p2 = loadPending(); const reqInfo = p2[openId]; delete p2[openId]; savePending(p2);
     if (isApprove) {
       approveUser(openId, userName, reqInfo?.department || '');
       sendBotMsg(openId, '审批通过', (reqInfo?.department ? '部门：' + reqInfo.department + '\n' : '') + '你的访问权限已通过，现在可以正常使用了。', APP_URL, 'green');
@@ -344,8 +346,7 @@ const router = {
     const { openId, userName, action } = body;
     if (!openId || !action) { sendJSON(res, 400, { ok: false }); return; }
     const isApprove = action === 'approve';
-    const reqInfo = pendingRequests.get(openId);
-    pendingRequests.delete(openId);
+    var p2 = loadPending(); const reqInfo = p2[openId]; delete p2[openId]; savePending(p2);
     if (isApprove) {
       approveUser(openId, userName, reqInfo?.department || '');
       sendBotMsg(openId, '审批通过', (reqInfo?.department ? '部门：' + reqInfo.department + '\n' : '') + '你的访问权限已通过，现在可以正常使用了。', APP_URL, 'green');
@@ -360,7 +361,7 @@ const router = {
     const session = sessions.get(tok);
     if (!session || session.openId !== await getAppOwnerId()) { sendJSON(res, 403, { ok: false, error: '仅应用所有者可操作' }); return; }
     const pending = [];
-    pendingRequests.forEach((v, k) => { pending.push({ openId: k, ...v }); });
+    var p3 = loadPending(); for (var k in p3) { pending.push({ openId: k, userName: p3[k].userName, department: p3[k].department || '', requestedAt: p3[k].requestedAt }); }
     sendJSON(res, 200, { ok: true, users: loadApproved(), pending });
   },
 
