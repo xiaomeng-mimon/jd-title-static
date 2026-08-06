@@ -360,10 +360,7 @@ const router = {
   },
 
   'GET /api/config': async (req, res) => {
-    sendJSON(res, 200, {
-      app_id: APP_ID,
-      llm_model: CONFIG.llm_model || ''
-    });
+    sendJSON(res, 200, { app_id: APP_ID });
   },
 
   'POST /api/cache/fetch-records': async (req, res) => {

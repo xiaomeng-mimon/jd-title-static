@@ -1,8 +1,7 @@
 {
-  "app_id": "向管理员获取",
-  "app_secret": "向管理员获取",
-  "port": 8080,
-  "llm_model": "deepseek-chat",
-  "llm_endpoint": "https://api.deepseek.com/v1/chat/completions",
-  "llm_api_key": "向管理员获取"
+  "app_id": "填自己的测试应用AppID",
+  "app_secret": "填自己的测试应用AppSecret",
+  "port": 8006,
+  "app_url": "http://localhost:8006",
+  "accessMode": "open"
 }
