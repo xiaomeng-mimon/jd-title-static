@@ -227,6 +227,14 @@ function analyzeIndustryKeywords(industryKeywords) {
 function normalizeDate(str) { if (!str) return ''; return String(str).replace(/\//g, '-').substring(0, 10); }
 
 function filterAndAggregate(records, dateRange) {
+  // records 是 {字段: {value:...}} 结构，先展开成 {字段: 值}，否则型号/统计取到对象导致错误
+  records = records.map(r => {
+    const flat = {};
+    for (const [k, v] of Object.entries(r)) {
+      flat[k] = (v && typeof v === 'object' && 'value' in v) ? v.value : v;
+    }
+    return flat;
+  });
   // 先确定性排序，消除飞书分页拉取顺序对并列结果的影响（保证分析结果稳定）
   records = [...records].sort((a, b) => String(a['视频名称'] || '').localeCompare(String(b['视频名称'] || '')) || String(a['时间'] || '').localeCompare(String(b['时间'] || '')) || String(a['型号'] || '').localeCompare(String(b['型号'] || '')));
   const { start, end } = dateRange || {};
