@@ -241,9 +241,29 @@ async function handleAnalyze() {
     // 3. 获取字段
     const fields = await getFieldList(baseToken, mainTable.id);
 
+    // 型号 Lookup 字段：把选项 ID 映射成名称（如 optnN1Ipta → IM102）
+    let modelMap = {};
+    const modelField = fields.find(f => f.name === '型号');
+    if (modelField && modelField.type === 19 && modelField.property && modelField.property.target_table && modelField.property.target_field) {
+      try {
+        const targetFields = await getFieldList(baseToken, modelField.property.target_table);
+        const tf = targetFields.find(f => f.id === modelField.property.target_field);
+        if (tf && tf.property && tf.property.options) {
+          tf.property.options.forEach(o => { modelMap[o.id] = o.name; });
+        }
+      } catch (e) {}
+    }
+
     // 4. 拉取所有原始记录（本地聚合，避免 data/query 权限问题）
     showLoading('正在拉取所有原始记录...');
     const records = await fetchRecordsCached(baseToken, mainTable.id);
+    // 型号选项 ID → 名称
+    if (Object.keys(modelMap).length) {
+      records.forEach(r => {
+        const v = r['型号'] && r['型号'].value;
+        if (v && modelMap[v]) r['型号'].value = modelMap[v];
+      });
+    }
 
     // 5. 按日期过滤 + 本地聚合
     const hasDateFilter = dateRange.start || dateRange.end;

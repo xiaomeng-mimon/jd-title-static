@@ -40,7 +40,7 @@ async function getTableList(baseToken) {
 
 async function getFieldList(baseToken, tableId) {
   const data = await feishuApi('GET', `/open-apis/bitable/v1/apps/${baseToken}/tables/${tableId}/fields`);
-  return data.items.map(f => ({ id: f.field_id, name: f.field_name, type: f.type }));
+  return data.items.map(f => ({ id: f.field_id, name: f.field_name, type: f.type, property: f.property || null }));
 }
 
 async function runDataQuery(baseToken, tableId, dslBody) {
