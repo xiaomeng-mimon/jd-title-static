@@ -70,12 +70,17 @@
       </div>
       <div style="margin-top:16px;">
         <button class="btn btn-primary" id="btn-analyze" onclick="handleAnalyze()">开始分析</button>
+        <button class="btn btn-secondary" onclick="handleRefresh()" style="margin-left:8px;" title="强制忽略缓存，立即从飞书拉取最新数据">刷新数据</button>
       </div>
+      <div class="hint" style="margin-top:6px;">🔄 数据每 6 小时自动刷新；若你刚更新了飞书表格，点「刷新数据」立即拉取最新，无需等待。</div>
     </section>
 
     <!-- 分析结果 -->
     <section class="card" id="analysis-panel" style="display:none;">
-      <h3><span class="step-badge">📊</span> 数据分析 <span class="step-status" id="step1-status"></span></h3>
+      <h3 style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;">
+        <span><span class="step-badge">📊</span> 数据分析 <span class="step-status" id="step1-status"></span></span>
+        <button class="btn btn-secondary" onclick="handleRefresh()" style="font-size:12px;padding:4px 12px;" title="强制忽略缓存，重新拉取飞书最新数据">🔄 刷新数据</button>
+      </h3>
       <div class="stat-grid" id="stat-grid"></div>
       <div class="chart-row">
         <div class="chart-box"><h4>🔥 热门词根 TOP10</h4><div id="word-cloud"></div></div>

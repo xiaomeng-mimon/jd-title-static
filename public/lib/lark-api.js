@@ -72,11 +72,11 @@ async function fetchRecords(baseToken, tableId, pageSize = 200) {
 }
 
 // 带缓存的记录拉取（通过服务端缓存，避免每次全量）
-async function fetchRecordsCached(baseToken, tableId) {
+async function fetchRecordsCached(baseToken, tableId, forceRefresh) {
   const res = await fetch('/api/cache/fetch-records', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-auth-token': sessionStorage.getItem('auth_token') || '' },
-    body: JSON.stringify({ baseToken, tableId })
+    body: JSON.stringify({ baseToken, tableId, forceRefresh: !!forceRefresh })
   });
   const data = await res.json();
   if (!data.ok) throw new Error(data.error || '缓存取数失败');

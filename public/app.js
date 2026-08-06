@@ -1,3 +1,4 @@
+let FORCE_REFRESH = false;  // 前端「刷新数据」按钮触发时置 true，拉数据强制忽略缓存
 let analysisData = null;
 let generatedData = null;
 
@@ -213,6 +214,12 @@ async function handleDebugRecords() {
   }
 }
 
+// ── 刷新数据：强制忽略缓存，立即拉取最新 ──
+function handleRefresh() {
+  FORCE_REFRESH = true;
+  handleAnalyze().finally(() => { FORCE_REFRESH = false; });
+}
+
 // ── 分析 ──
 async function handleAnalyze() {
   const baseUrl = document.getElementById('baseUrl').value.trim();
@@ -261,7 +268,7 @@ async function handleAnalyze() {
 
     // 4. 拉取所有原始记录（本地聚合，避免 data/query 权限问题）
     showLoading('正在拉取所有原始记录...');
-    const records = await fetchRecordsCached(baseToken, mainTable.id);
+    const records = await fetchRecordsCached(baseToken, mainTable.id, FORCE_REFRESH);
     // 型号选项 ID → 名称
     if (Object.keys(modelMap).length) {
       records.forEach(r => {
@@ -280,7 +287,7 @@ async function handleAnalyze() {
     let industryKeywords = [];
     for (const kt of keywordTables) {
       showLoading(`正在拉取热搜词: ${kt.name}...`);
-      const records = await fetchRecordsCached(baseToken, kt.id);
+      const records = await fetchRecordsCached(baseToken, kt.id, FORCE_REFRESH);
       industryKeywords.push(...records);
     }
     // 按日期筛选热搜词
@@ -321,6 +328,7 @@ async function handleAnalyze() {
     setStepStatus('step1-status', 'error', '失败');
     alert('分析失败: ' + e.message);
   } finally {
+    FORCE_REFRESH = false;
     hideLoading();
     btn.disabled = false;
   }

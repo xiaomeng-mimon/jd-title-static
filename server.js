@@ -366,21 +366,26 @@ const router = {
   'POST /api/cache/fetch-records': async (req, res) => {
     try {
       const body = await parseBody(req);
-      const { baseToken, tableId } = body;
+      const { baseToken, tableId, forceRefresh } = body;
       if (!baseToken || !tableId) { sendJSON(res, 400, { ok: false, error: '缺少 baseToken 或 tableId' }); return; }
 
-      // 有缓存直接返回
+      const CACHE_TTL = 6 * 60 * 60 * 1000; // 缓存有效期 6 小时
       const meta = loadCacheMeta();
       const cached = meta[tableId];
-      if (cached && cached.total > 0) {
-        const records = loadCachedRecords(tableId);
-        if (records) {
-          sendJSON(res, 200, { ok: true, fromCache: true, total: cached.total, records, cachedAt: cached.updatedAt });
-          return;
+      // 有缓存且未过期且非强制刷新 → 返回缓存
+      if (!forceRefresh && cached && cached.total > 0) {
+        const age = Date.now() - new Date(cached.updatedAt).getTime();
+        if (age < CACHE_TTL) {
+          const records = loadCachedRecords(tableId);
+          if (records) {
+            sendJSON(res, 200, { ok: true, fromCache: true, total: cached.total, records, cachedAt: cached.updatedAt });
+            return;
+          }
         }
+        // 缓存过期或 forceRefresh → 继续重新拉取
       }
 
-      // 无缓存 → 双重拉取合并去重
+      // 无缓存 / 缓存过期 / 强制刷新 → 双重拉取合并去重
       const records = await fetchAllRecords(baseToken, tableId);
       sendJSON(res, 200, { ok: true, fromCache: false, total: records.length, records, cachedAt: new Date().toISOString() });
     } catch (e) {
@@ -494,7 +499,8 @@ http.createServer(async (req, res) => {
   const ext = path.extname(fp);
   fs.readFile(fp, (err, data) => {
     if (err) { res.writeHead(404); res.end('Not Found'); return; }
-    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+    // 禁用缓存：内部工具页面迭代频繁，避免浏览器加载旧版 HTML/JS 导致按钮缺失、功能不对
+    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': 'no-store' });
     res.end(data);
   });
 }).listen(PORT, () => {
