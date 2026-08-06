@@ -138,6 +138,7 @@ function feishuReq(method, feishuPath, data, token) {
       res.on('end', () => { try { resolve(JSON.parse(body)); } catch { resolve({ raw: body }); } });
     });
     r.on('error', reject);
+    r.setTimeout(8000, () => { r.destroy(); reject(new Error('feishu 请求超时(8s)')); }); // 防止挂起导致登录卡死
     if (data) r.write(JSON.stringify(data));
     r.end();
   });
@@ -277,9 +278,11 @@ const router = {
       if (iData.code !== 0 || !iData.data) throw new Error('用户信息获取失败');
       const openId = iData.data.open_id;
       const userName = iData.data.name;
-      let department = '';
-      try { department = await getDepartment(openId, uData.data.access_token); } catch (e) { /* ignore */ }
-      const appOwner = await getAppOwnerId();
+      // 部门 + 应用所有者并行获取，缩短登录等待
+      const [department, appOwner] = await Promise.all([
+        getDepartment(openId, uData.data.access_token).catch(() => ''),
+        getAppOwnerId()
+      ]);
       const isOwner = (openId === appOwner);
       // open 模式：登录即通过；approval 模式：仅所有者/已通过
       const approved = OPEN_MODE || isOwner || isApproved(openId);
