@@ -289,7 +289,7 @@ async function generateAll(analysis, userInput) {
         valid.filter(function(t){return t.structure==='C'}).slice(0,3)
       );
       var titles = picked.map(function(t){ return { title: t.title, structure: t.structure, words: t.words, reasoning: '结构'+t.structure+' · LLM生成' }; });
-      var strategy = '大模型生成（'+LLM_CONFIG.model+'）\n  · 品类热搜词：'+getCategoryKW(product.name)+'\n  · 生成规则：A避坑防御(3条) / B效率提升(4条) / C痛点反转(3条)\n  · 字数限制：5-25字内（含标点数字）\n  · 禁止品牌词 + 禁止浮夸词 + 参数事实合规';
+      var strategy = '大模型生成（'+LLM_CONFIG.model+'）\n  · 品类热搜词：'+getCategoryKW(product.name)+'\n  · 生成规则：A避坑防御(3条) / B效率提升(4条) / C痛点反转(3条)\n  · 字数限制：5-27字内（含标点数字）\n  · 禁止品牌词 + 禁止浮夸词 + 参数事实合规';
       return { model: model, result: { product: product, titles: titles, strategy: strategy } };
     }).catch(function(e) {
       return { model: model, result: { product: product, titles: [], strategy: '', error: e.message } };
