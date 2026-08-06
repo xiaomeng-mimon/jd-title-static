@@ -4,3 +4,4 @@ admin.html
 cache/
 *.log
 approved.json
+pending.json
