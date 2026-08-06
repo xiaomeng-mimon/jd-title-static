@@ -15,7 +15,7 @@ function getUserLLMConfig() {
 // ── LLM 配置（从 localStorage 用户配置读取） ──
 var LLM_CONFIG = {
   get model() { return getUserLLMConfig().model; },
-  temperature: 0,   // 固定为 0：保证同一输入生成结果稳定（每次一致）
+  temperature: 0.9,   // 高温度：保证每次生成的标题多样化（数据分析部分仍是确定的）
   maxTokens: 6000  // 30条标题需要足够输出空间
 };
 

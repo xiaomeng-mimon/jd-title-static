@@ -52,6 +52,7 @@
             <div class="input-group">
               <label>Model</label>
               <input type="text" id="llm-model" placeholder="模型名，如 deepseek-v4-pro、gpt-4o" onchange="onLLMFieldChange()" autocomplete="off" />
+              <div class="hint" style="margin-top:2px;">示例：<a href="javascript:void(0)" onclick="document.getElementById('llm-model').value='deepseek-v4-flash'" style="color:#B8864E;cursor:pointer;">deepseek-v4-flash</a></div>
             </div>
             <div class="input-group">
               <label>API Key</label>
@@ -61,6 +62,7 @@
           <div class="input-group" style="margin-top:8px;">
             <label>Endpoint（API地址）</label>
             <input type="text" id="llm-endpoint" placeholder="https://api.xxx.com/v1/chat/completions" onchange="onLLMFieldChange()" />
+            <div class="hint" style="margin-top:2px;">示例：<a href="javascript:void(0)" onclick="document.getElementById('llm-endpoint').value='https://token-plan-cn.xiaomimimo.com/v1/chat/completions'" style="color:#B8864E;cursor:pointer;">https://token-plan-cn.xiaomimimo.com/v1/chat/completions</a></div>
           </div>
           <div class="hint" id="llm-hint" style="margin-top:4px;"></div>
           <div style="margin-top:4px;font-size:11px;"><a href="javascript:localStorage.removeItem('jd-llm-config');location.reload();" style="color:#c62828;">清除 LLM 配置</a></div>
