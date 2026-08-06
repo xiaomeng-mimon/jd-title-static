@@ -383,7 +383,6 @@ function renderAnalysis(data) {
 
 // ── 趋势渲染 ──
 function renderTrend(data) {
-  renderTrendSummary(data);
   renderTrendComparison(data.comparisons, data.period);
   renderTrendChart(data.dailyTrend);
   if (data.modelTrends && data.modelTrends.length) renderTrendModels(data.modelTrends);
