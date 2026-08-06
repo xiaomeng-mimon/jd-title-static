@@ -244,9 +244,10 @@ async function handleAnalyze() {
     // 型号 Lookup 字段：把选项 ID 映射成名称（如 optnN1Ipta → IM102）
     let modelMap = {};
     const modelField = fields.find(f => f.name === '型号');
-    if (modelField && modelField.type === 19 && modelField.property && modelField.property.target_table && modelField.property.target_field) {
+    const targetTable = modelField && modelField.property ? (modelField.property.filter_info?.target_table || modelField.property.target_table) : null;
+    if (modelField && modelField.type === 19 && targetTable && modelField.property.target_field) {
       try {
-        const targetFields = await getFieldList(baseToken, modelField.property.target_table);
+        const targetFields = await getFieldList(baseToken, targetTable);
         const tf = targetFields.find(f => f.id === modelField.property.target_field);
         if (tf && tf.property && tf.property.options) {
           tf.property.options.forEach(o => { modelMap[o.id] = o.name; });
