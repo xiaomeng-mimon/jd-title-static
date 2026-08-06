@@ -74,14 +74,14 @@ function runTrendAnalysis(dailyRaw, modelDailyRaw, dateRange = {}) {
       const tViews = mThis.reduce((s, r) => s + r.views, 0);
       const lViews = mLast.reduce((s, r) => s + r.views, 0);
       return { model, viewsHB: lViews>0?(((tViews-lViews)/lViews)*100).toFixed(1):'∞', gmvHB: lGmv>0?(((tGmv-lGmv)/lGmv)*100).toFixed(1):'∞', thisViews: tViews, lastViews: lViews, thisGmv: tGmv, lastGmv: lGmv };
-    }).sort((a, b) => parseFloat(b.gmvHB || 0) - parseFloat(a.gmvHB || 0));
+    }).sort((a, b) => parseFloat(b.gmvHB || 0) - parseFloat(a.gmvHB || 0) || (a.model < b.model ? -1 : a.model > b.model ? 1 : 0));
   }
 
   const dailyTrend = thisPeriod.map(d => ({ date: d.date, views: d.views, detail: d.detail, gmv: d.gmv, buyers: d.buyers, count: d.count }));
   const findings = [];
-  const bestDay = [...dailyTrend].sort((a, b) => b.gmv - a.gmv)[0];
+  const bestDay = [...dailyTrend].sort((a, b) => b.gmv - a.gmv || (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))[0];
   if (bestDay) findings.push(`最佳成交日: ${bestDay.date} (GMV ¥${bestDay.gmv})`);
-  const worstDay = [...dailyTrend].sort((a, b) => a.gmv - b.gmv)[0];
+  const worstDay = [...dailyTrend].sort((a, b) => a.gmv - b.gmv || (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))[0];
   if (worstDay && worstDay.date !== bestDay?.date) findings.push(`最差成交日: ${worstDay.date} (GMV ¥${worstDay.gmv})`);
   const gmvComp = comparisons.find(c => c.label === '7天成交金额');
   if (gmvComp) { if (gmvComp.direction === 'up') findings.push(`成交金额环比${gmvComp.pct}%↑，增长${gmvComp.diff}元`); else if (gmvComp.direction === 'down') findings.push(`成交金额环比${gmvComp.pct}%↓，减少${Math.abs(gmvComp.diff)}元`); }

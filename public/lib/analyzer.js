@@ -65,7 +65,7 @@ function extractWordFrequencies(samples) {
     }
   });
   const minCount = samples.length <= 5 ? 1 : samples.length <= 15 ? 2 : 3;
-  const entries = Object.entries(allWords).filter(([w, c]) => c >= minCount).sort((a, b) => b[1] - a[1] || b[0].length - a[0].length);
+  const entries = Object.entries(allWords).filter(([w, c]) => c >= minCount).sort((a, b) => b[1] - a[1] || b[0].length - a[0].length || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
   const result = [];
   for (const [w, c] of entries) {
     if (w.length <= 3) {
@@ -83,7 +83,7 @@ function extractSellingPoints(samples) {
     const t = r['视频名称']?.value || '';
     Object.keys(spWords).forEach(sp => { if (t.includes(sp)) spWords[sp]++; });
   });
-  return Object.entries(spWords).filter(([_, c]) => c > 0).sort((a, b) => b[1] - a[1]);
+  return Object.entries(spWords).filter(([_, c]) => c > 0).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
 }
 
 function analyzeStructures(samples) {
@@ -98,7 +98,7 @@ function analyzeStructures(samples) {
     else structCounts['其他/卖点堆叠'] = (structCounts['其他/卖点堆叠'] || 0) + 1;
   });
   const total = samples.length;
-  return Object.entries(structCounts).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, count, pct: (count / total * 100).toFixed(0) }));
+  return Object.entries(structCounts).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)).map(([name, count]) => ({ name, count, pct: (count / total * 100).toFixed(0) }));
 }
 
 function analyzeWordCount(samples) {
@@ -143,13 +143,13 @@ function analyzeTitleAttributes(samples, rawTitles) {
     typeData[type].gmv.push(m.gmv || 0);
   });
   const total = samples.length;
-  const distribution = Object.entries(typeData).sort((a, b) => b[1].count - a[1].count).map(([type, d]) => ({
+  const distribution = Object.entries(typeData).sort((a, b) => b[1].count - a[1].count || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)).map(([type, d]) => ({
     type, count: d.count, pct: (d.count / total * 100).toFixed(0),
     avgViews: (d.views.reduce((s, v) => s + v, 0) / d.count).toFixed(0),
     avgDetail: (d.detail.reduce((s, v) => s + v, 0) / d.count).toFixed(0),
     avgGmv: (d.gmv.reduce((s, v) => s + v, 0) / d.count).toFixed(0)
   }));
-  const bestType = distribution.sort((a, b) => parseFloat(b.avgGmv) - parseFloat(a.avgGmv))[0]?.type || '混合型';
+  const bestType = distribution.sort((a, b) => parseFloat(b.avgGmv) - parseFloat(a.avgGmv) || (a.type < b.type ? -1 : a.type > b.type ? 1 : 0))[0]?.type || '混合型';
   return { distribution, bestType };
 }
 
@@ -163,7 +163,7 @@ function getTopSamples(samples, n = 15) {
     const model = r['型号']?.value || '';
     return { title, views, detail, gmv, buyers, model, type: classifyTitle(title), score: Math.round(gmv * 0.5 + detail * 0.3 + views * 0.2) };
   });
-  return scored.filter(s => s.title).sort((a, b) => b.score - a.score).slice(0, n);
+  return scored.filter(s => s.title).sort((a, b) => b.score - a.score || (a.title < b.title ? -1 : a.title > b.title ? 1 : 0)).slice(0, n);
 }
 
 function parseSearchVolume(val) {
@@ -218,7 +218,7 @@ function analyzeIndustryKeywords(industryKeywords) {
     conversionRate: parseFloat((g.conversionRates.reduce((a, b) => a + b, 0) / g.count).toFixed(2)),
     clickRate: parseFloat((g.clickRates.reduce((a, b) => a + b, 0) / g.count).toFixed(2)),
     model: classifyKeywordToModel(g.term), recordCount: g.count
-  })).sort((a, b) => b.searchVolume - a.searchVolume);
+  })).sort((a, b) => b.searchVolume - a.searchVolume || (a.term < b.term ? -1 : a.term > b.term ? 1 : 0));
   const topByModel = {};
   for (const kw of ranked) { const m = kw.model; if (!topByModel[m]) topByModel[m] = []; if (topByModel[m].length < 10) topByModel[m].push(kw); }
   return { ranked, topByModel, summary: `行业热搜词 ${ranked.length}个，TOP5: ${ranked.slice(0, 5).map(k => k.term).join('、')}` };
@@ -227,6 +227,8 @@ function analyzeIndustryKeywords(industryKeywords) {
 function normalizeDate(str) { if (!str) return ''; return String(str).replace(/\//g, '-').substring(0, 10); }
 
 function filterAndAggregate(records, dateRange) {
+  // 先确定性排序，消除飞书分页拉取顺序对并列结果的影响（保证分析结果稳定）
+  records = [...records].sort((a, b) => String(a['视频名称'] || '').localeCompare(String(b['视频名称'] || '')) || String(a['时间'] || '').localeCompare(String(b['时间'] || '')) || String(a['型号'] || '').localeCompare(String(b['型号'] || '')));
   const { start, end } = dateRange || {};
   const normStart = start ? normalizeDate(start) : null;
   const normEnd = end ? normalizeDate(end) : null;
@@ -264,7 +266,7 @@ function filterAndAggregate(records, dateRange) {
     byTitle[key]['sum(引导进商详访客数)'].value += parseInt(r['引导进商详访客数']) || 0;
     byTitle[key]['count(视频观看次数)'].value += 1;
   }
-  const titles = Object.values(byTitle).sort((a, b) => (b['sum(7天引导成交金额)'].value || 0) - (a['sum(7天引导成交金额)'].value || 0));
+  const titles = Object.values(byTitle).sort((a, b) => (b['sum(7天引导成交金额)'].value || 0) - (a['sum(7天引导成交金额)'].value || 0) || String(a['视频名称']?.value || '').localeCompare(String(b['视频名称']?.value || '')));
   return { stats, titles, dateRange: actualRange, totalRecords: filtered.length };
 }
 
@@ -274,7 +276,7 @@ function runAnalysis(data) {
   const samples = filterSamples(titles, thresholds);
   const byModelRaw = breakdownByModel(samples);
   const total = samples.length;
-  const byModel = Object.entries(byModelRaw).sort((a, b) => b[1].length - a[1].length).map(([model, items]) => ({
+  const byModel = Object.entries(byModelRaw).sort((a, b) => b[1].length - a[1].length || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)).map(([model, items]) => ({
     model, count: items.length, pct: (items.length / total * 100).toFixed(0),
     wordFreq: extractWordFrequencies(items), spFreq: extractSellingPoints(items)
   }));
