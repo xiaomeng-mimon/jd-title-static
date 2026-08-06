@@ -2,6 +2,9 @@ const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
+const { exec } = require('child_process');
+const { promisify } = require('util');
+const asyncExec = promisify(exec);
 
 const ROOT = __dirname;
 
@@ -173,9 +176,8 @@ let ownerCache = null, ownerCacheTime = 0;
 async function getAppOwnerId() {
   if (ownerCache && Date.now() - ownerCacheTime < 60000) return ownerCache;
   try {
-    const t = await getAppToken();
-    const d = await feishuReq('GET',
-      `/open-apis/application/v6/applications/${APP_ID}/collaborators`, null, t);
+    const { stdout } = await asyncExec(`lark-cli --profile jd-title-static api GET "application/v6/applications/${APP_ID}/collaborators"`, { maxBuffer: 1024 * 1024 });
+    const d = JSON.parse(stdout);
     const owners = (d.data?.collaborators || []).filter(c => c.type === 'owner');
     ownerCache = owners.length > 0 ? owners[0].user_id : '';
     ownerCacheTime = Date.now();
@@ -185,41 +187,23 @@ async function getAppOwnerId() {
 
 // 部门查询
 async function getDepartment(openId, userToken) {
-  if (userToken) {
-    try {
-      const d = await feishuReq('GET', `/open-apis/contact/v3/users/${openId}`, null, userToken);
-      if (d.code === 0 && d.data?.user?.department_ids?.length > 0) {
-        console.log('[部门] 获取成功:', d.data.user.department_ids.join(','));
-        return d.data.user.department_ids.join(',');
-      }
-      if (d.code !== 0) console.warn('[部门] 用户token查询失败:', d.code, d.msg);
-    } catch (e) { console.error('[部门] 用户token方式失败:', e.message); }
-  }
   try {
-    const t = await getTenantToken();
-    const d = await feishuReq('GET', `/open-apis/contact/v3/users/${openId}`, null, t);
-    if (d.code === 0 && d.data?.user?.department_ids?.length > 0) {
-      console.log('[部门] 租户token获取成功:', d.data.user.department_ids.join(','));
-      return d.data.user.department_ids.join(',');
+    const { stdout } = await asyncExec(`lark-cli --profile jd-title-static --as user contact +search-user --user-ids ${openId}`, { maxBuffer: 1024 * 1024 });
+    const d = JSON.parse(stdout);
+    if (d.ok && d.data?.users?.[0]?.department) {
+      return d.data.users[0].department;
     }
-    if (d.code !== 0) console.warn('[部门] 租户token查询失败:', d.code, d.msg);
-  } catch (e) { console.error('[部门] 租户token方式失败:', e.message); }
+  } catch (e) { console.warn('[部门] lark-cli 方式失败:', e.message); }
   return '';
 }
 
 // ── 机器人发消息 ──
 async function sendBotMsg(openId, title, content, url, color) {
   try {
-    const t = await getTenantToken();
     const parts = content.split('\n');
     const divs = parts.map(p => '{"tag":"div","text":{"tag":"lark_md","content":"' + p.replace(/"/g, '\\"') + '"}}').join(',');
-    const elements = [divs];
-    if (url) {
-      elements.push('{"tag":"action","actions":[{"tag":"button","text":{"tag":"plain_text","content":"进入应用"},"type":"primary","multi_url":{"url":"' + url + '"}}]}');
-    }
-    const card = '{"header":{"title":{"tag":"plain_text","content":"' + title + '"},"template":"' + (color || 'blue') + '"},"elements":[' + elements.join(',') + ']}';
-    await feishuReq('POST', '/open-apis/im/v1/messages?receive_id_type=open_id',
-      { receive_id: openId, msg_type: 'interactive', content: card }, t);
+    const card = '{"header":{"title":{"tag":"plain_text","content":"' + title + '"},"template":"' + (color || 'blue') + '"},"elements":[' + divs + (url ? ',{"tag":"action","actions":[{"tag":"button","text":{"tag":"plain_text","content":"进入应用"},"type":"primary","multi_url":{"url":"' + url + '"}}]' : '') + ']}';
+    await asyncExec(`lark-cli --profile jd-title-static im +messages-send --user-id ${openId} --msg-type interactive --content ${JSON.stringify(card)}`, { maxBuffer: 1024 * 1024 });
   } catch (e) { console.error('sendBotMsg failed:', e.message); }
 }
 
@@ -233,8 +217,7 @@ async function sendApproveCard(userName, openId, department) {
     const adminUrl = APP_URL + '/admin.html';
     const card = '{"header":{"title":{"tag":"plain_text","content":"权限申请"},"template":"blue"},"elements":[' + divs +
       ',{"tag":"action","actions":[{"tag":"button","text":{"tag":"plain_text","content":"查看申请"},"type":"primary","multi_url":{"url":"' + adminUrl + '"}}]}]}';
-    await feishuReq('POST', '/open-apis/im/v1/messages?receive_id_type=open_id',
-      { receive_id: owner, msg_type: 'interactive', content: card }, await getTenantToken());
+    await asyncExec(`lark-cli --profile jd-title-static im +messages-send --user-id ${owner} --msg-type interactive --content ${JSON.stringify(card)}`, { maxBuffer: 1024 * 1024 });
   } catch (e) { console.error('sendApproveCard failed:', e.message); }
 }
 
