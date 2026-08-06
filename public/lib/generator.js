@@ -114,7 +114,7 @@ async function callLLM(systemPrompt, userMessage) {
 
   const res = await fetch('/api/llm', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'x-auth-token': sessionStorage.getItem('auth_token') || '' },
     body: JSON.stringify(body)
   });
 

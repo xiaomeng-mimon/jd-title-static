@@ -111,21 +111,39 @@ function buildModelDailyFromRecords(records) {
 }
 
 // ── 历史链接 ──
-function getHistory() { try { return JSON.parse(localStorage.getItem('jd-url-history') || '[]'); } catch { return []; } }
-function addHistory(url) { const list = getHistory().filter(u => u !== url); list.unshift(url); localStorage.setItem('jd-url-history', JSON.stringify(list.slice(0, 20))); }
+const escHtml = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+function getHistory() { try { const l = JSON.parse(localStorage.getItem('jd-url-history') || '[]'); return Array.isArray(l) ? l.filter(x => x && typeof x.u === 'string') : []; } catch { return []; } }
+function addHistory(url) {
+  if (!url) return; url = url.trim(); if (!url) return;
+  const list = getHistory().filter(x => x.u !== url);
+  list.unshift({ u: url, t: Date.now() });
+  localStorage.setItem('jd-url-history', JSON.stringify(list.slice(0, 20)));
+}
+function fmtHistoryTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts); const p = n => String(n).padStart(2, '0');
+  const now = new Date();
+  const isToday = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  const hhmm = p(d.getHours()) + ':' + p(d.getMinutes());
+  return isToday ? '今天 ' + hhmm : `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${hhmm}`;
+}
 function renderHistoryDropdown() {
   const dd = document.getElementById('hist-dropdown');
   const list = getHistory();
   if (!list.length) { dd.classList.remove('show'); return; }
-  dd.innerHTML = list.map(item => `<div class="hist-item" data-url="${item.replace(/"/g, '&quot;')}">${item}</div>`).join('') + '<div class="hist-clear">清空历史记录</div>';
+  dd.innerHTML = list.map((item, i) => `<div class="hist-item" data-i="${i}"><span class="hist-url">${escHtml(item.u)}</span><span class="hist-time">${fmtHistoryTime(item.t)}</span></div>`).join('') + '<div class="hist-clear">清空历史记录</div>';
 }
+function closeHistory() { document.getElementById('hist-dropdown').classList.remove('show'); }
 document.getElementById('baseUrl').addEventListener('focus', () => { renderHistoryDropdown(); document.getElementById('hist-dropdown').classList.add('show'); });
-document.getElementById('baseUrl').addEventListener('input', () => { document.getElementById('hist-dropdown').classList.remove('show'); });
+document.getElementById('baseUrl').addEventListener('input', () => closeHistory());
+document.getElementById('baseUrl').addEventListener('blur', () => { setTimeout(() => { const v = document.getElementById('baseUrl').value.trim(); if (v) addHistory(v); }, 120); });
 document.addEventListener('click', (e) => {
-  if (e.target.classList.contains('hist-item')) { document.getElementById('baseUrl').value = e.target.dataset.url; document.getElementById('hist-dropdown').classList.remove('show'); }
-  if (e.target.classList.contains('hist-clear')) { localStorage.removeItem('jd-url-history'); var dd = document.getElementById('hist-dropdown'); dd.innerHTML = ''; dd.classList.remove('show'); }
-  if (!e.target.closest('#baseUrl') && !e.target.closest('#hist-dropdown')) { document.getElementById('hist-dropdown').classList.remove('show'); }
+  const item = e.target.closest('.hist-item');
+  if (item) { const h = getHistory()[+item.dataset.i]; if (h) { document.getElementById('baseUrl').value = h.u; closeHistory(); } }
+  if (e.target.closest('.hist-clear')) { localStorage.removeItem('jd-url-history'); document.getElementById('hist-dropdown').innerHTML = ''; closeHistory(); }
+  if (!e.target.closest('#baseUrl') && !e.target.closest('#hist-dropdown')) closeHistory();
 });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeHistory(); });
 
 // ── 自动初始化：OAuth 登录成功后自动获取 token ──
 (function autoInit() {
@@ -181,7 +199,7 @@ async function handleDebugRecords() {
     if (!mainTable) mainTable = tables[0];
     const fields = await getFieldList(baseToken, mainTable.id);
     const fieldNames = fields.map(f => f.name).join('\n');
-    const rawRes = await fetch('/api/debug-records', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ baseToken, tableId: mainTable.id, token: getToken() }) });
+    const rawRes = await fetch('/api/debug-records', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-auth-token': sessionStorage.getItem('auth_token') || '' }, body: JSON.stringify({ baseToken, tableId: mainTable.id, token: getToken() }) });
     const rawData = await rawRes.json();
     const recordCount = rawData.data?.items?.length || 0;
     const sampleFields = recordCount > 0 ? JSON.stringify(rawData.data.items[0].fields, null, 2) : '无记录';

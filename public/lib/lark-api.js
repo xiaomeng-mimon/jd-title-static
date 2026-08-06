@@ -10,6 +10,7 @@ async function feishuApi(method, path, body, params) {
 
   const headers = {};
   if (accessToken) headers['x-feishu-token'] = accessToken;
+  headers['x-auth-token'] = sessionStorage.getItem('auth_token') || '';
 
   const opts = { method, headers };
   if (body && method !== 'GET') opts.body = JSON.stringify(body);
@@ -22,7 +23,7 @@ async function feishuApi(method, path, body, params) {
 
 // OAuth 登录后从服务端获取 token
 async function initOAuthToken() {
-  const res = await fetch('/api/feishu-token');
+  const res = await fetch('/api/feishu-token', { headers: { 'x-auth-token': sessionStorage.getItem('auth_token') || '' } });
   const data = await res.json();
   if (data.token) {
     accessToken = data.token;
@@ -74,7 +75,7 @@ async function fetchRecords(baseToken, tableId, pageSize = 200) {
 async function fetchRecordsCached(baseToken, tableId) {
   const res = await fetch('/api/cache/fetch-records', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'x-auth-token': sessionStorage.getItem('auth_token') || '' },
     body: JSON.stringify({ baseToken, tableId })
   });
   const data = await res.json();

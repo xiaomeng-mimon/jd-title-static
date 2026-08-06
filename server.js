@@ -15,6 +15,7 @@ const APP_ID = CONFIG.app_id || '';
 const APP_SECRET = CONFIG.app_secret || '';
 const PORT = CONFIG.port || 8080;
 const APP_URL = `http://192.168.101.13:${PORT}`;
+const OPEN_MODE = CONFIG.accessMode === 'open'; // 访问模式：open=全员登录即用，approval/缺省=申请审批制
 
 const CT_JSON = { 'Content-Type': 'application/json; charset=utf-8' };
 const CT_HTML = { 'Content-Type': 'text/html; charset=utf-8' };
@@ -280,8 +281,10 @@ const router = {
       try { department = await getDepartment(openId, uData.data.access_token); } catch (e) { /* ignore */ }
       const appOwner = await getAppOwnerId();
       const isOwner = (openId === appOwner);
-      const approved = isOwner || isApproved(openId);
-      if (isOwner && !isApproved(openId)) { approveUser(openId, userName, department); }
+      // open 模式：登录即通过；approval 模式：仅所有者/已通过
+      const approved = OPEN_MODE || isOwner || isApproved(openId);
+      // open 模式记录使用者（管理页可见）；approval 模式仅所有者自动记录
+      if ((OPEN_MODE || isOwner) && !isApproved(openId)) { approveUser(openId, userName, department); }
       if (approved && department) {
         const a = loadApproved();
         if (a[openId] && !a[openId].department) {
@@ -313,43 +316,30 @@ const router = {
     const parsed = new URL(req.url, 'http://localhost');
     const openId = parsed.searchParams.get('openId');
     if (!openId) { sendJSON(res, 400, { approved: false }); return; }
-    sendJSON(res, 200, { approved: isApproved(openId) });
+    sendJSON(res, 200, { approved: OPEN_MODE || isApproved(openId) });
   },
 
-  'GET /api/approve': async (req, res) => {
-    const parsed = new URL(req.url, 'http://localhost');
-    const openId = parsed.searchParams.get('openId');
-    const userName = parsed.searchParams.get('userName');
-    const action = parsed.searchParams.get('action');
-    if (!openId || !action) { res.writeHead(400, CT_HTML); res.end('<h2>参数错误</h2>'); return; }
-    const isApprove = action === 'approve';
-    var p2 = loadPending(); const reqInfo = p2[openId]; delete p2[openId]; savePending(p2);
-    if (isApprove) {
-      approveUser(openId, userName, reqInfo?.department || '');
-      sendBotMsg(openId, '审批通过', (reqInfo?.department ? '部门：' + reqInfo.department + '\n' : '') + '你的访问权限已通过，现在可以正常使用了。', APP_URL, 'green');
-    } else {
-      sendBotMsg(openId, '审批未通过', (reqInfo?.department ? '部门：' + reqInfo.department + '\n' : '') + '你的访问申请未通过，如有疑问请联系管理员。', '', 'red');
-    }
-    const color = isApprove ? '#2e7d32' : '#c62828';
-    const bg = isApprove ? '#f0f8f0' : '#fff5f5';
-    const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="text-align:center;padding:60px 20px;font-family:sans-serif;background:' + bg + '"><p style="font-size:18px;color:' + color + '">' + (isApprove ? '已通过 ' : '已拒绝 ') + (userName || '') + '</p><script>setTimeout(function(){location.href="/admin.html"},800)</script></body></html>';
-    res.writeHead(200, CT_HTML);
-    res.end(html);
-  },
-
+  // ---- 审批执行（管理页调用，仅应用所有者） ----
   'POST /api/approve': async (req, res) => {
-    const body = await parseBody(req);
-    const { openId, userName, action } = body;
-    if (!openId || !action) { sendJSON(res, 400, { ok: false }); return; }
-    const isApprove = action === 'approve';
-    var p2 = loadPending(); const reqInfo = p2[openId]; delete p2[openId]; savePending(p2);
-    if (isApprove) {
-      approveUser(openId, userName, reqInfo?.department || '');
-      sendBotMsg(openId, '审批通过', (reqInfo?.department ? '部门：' + reqInfo.department + '\n' : '') + '你的访问权限已通过，现在可以正常使用了。', APP_URL, 'green');
-    } else {
-      sendBotMsg(openId, '审批未通过', (reqInfo?.department ? '部门：' + reqInfo.department + '\n' : '') + '你的访问申请未通过，如有疑问请联系管理员。', '', 'red');
-    }
-    sendJSON(res, 200, { ok: true });
+    try {
+      // 仅应用所有者（管理员）可审批 —— 安全关键
+      const tok = req.headers['x-auth-token'] || '';
+      const session = sessions.get(tok);
+      if (!session || session.openId !== await getAppOwnerId()) { sendJSON(res, 403, { ok: false, error: '仅应用所有者可操作' }); return; }
+      const body = await parseBody(req);
+      const { openId, userName, action } = body;
+      if (!openId || !action) { sendJSON(res, 400, { ok: false }); return; }
+      const isApprove = action === 'approve';
+      var p2 = loadPending(); const reqInfo = p2[openId]; delete p2[openId]; savePending(p2);
+      const who = userName || reqInfo?.userName || '该用户';
+      if (isApprove) {
+        approveUser(openId, userName, reqInfo?.department || '');
+        sendBotMsg(openId, '审批通过', who + '，你的访问权限已通过，现在可以正常使用了。', APP_URL, 'green');
+      } else {
+        sendBotMsg(openId, '审批未通过', who + '，你的访问申请未通过，如有疑问请联系管理员。', '', 'red');
+      }
+      sendJSON(res, 200, { ok: true });
+    } catch (e) { sendJSON(res, 500, { ok: false, error: e.message }); }
   },
 
   'GET /api/admin/users': async (req, res) => {
@@ -447,6 +437,15 @@ const router = {
 http.createServer(async (req, res) => {
   const parsed = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const k = `${req.method} ${parsed.pathname}`;
+
+  // 接口认证中间件：业务接口需登录（公开接口除外）
+  const OPEN_API = ['POST /api/auth/verify', 'POST /api/auth/request', 'GET /api/auth/status', 'GET /api/config'];
+  if (parsed.pathname.startsWith('/api/') && req.method !== 'OPTIONS' && !OPEN_API.includes(k)) {
+    const tok = req.headers['x-auth-token'] || '';
+    const session = sessions.get(tok);
+    if (!session) { sendJSON(res, 401, { ok: false, error: '未登录' }); return; }
+    if (!OPEN_MODE && !session.approved && !isApproved(session.openId)) { sendJSON(res, 403, { ok: false, error: '你的权限申请尚未通过，请等待管理员审批' }); return; }
+  }
 
   if (router[k]) { await router[k](req, res); return; }
 

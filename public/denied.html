@@ -6,33 +6,85 @@
 <title>米萌标题智能运营 — 申请权限</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;background:linear-gradient(135deg,#1a1a2e,#16213e,#0f3460);min-height:100vh;display:flex;align-items:center;justify-content:center}
-.box{background:#fff;border-radius:12px;padding:40px;width:420px;box-shadow:0 20px 60px rgba(0,0,0,0.3);text-align:center}
-.box .icon{font-size:48px;margin-bottom:12px}
-.box h1{font-size:20px;color:#1a1a2e;margin-bottom:6px}
-.box .user{background:#f5f5f5;border-radius:8px;padding:12px;margin-bottom:16px;font-size:15px;line-height:1.8}
-.box p{font-size:14px;color:#666;margin-bottom:20px;line-height:1.6}
-.box .btn{padding:10px 32px;background:#e53935;color:#fff;border:none;border-radius:6px;font-size:15px;cursor:pointer}
-.box .btn:disabled{background:#ccc;cursor:not-allowed}
-.box .btn.success{background:#4caf50}
-.spinner{display:inline-block;width:16px;height:16px;border:2px solid #e0e0e0;border-top-color:#e53935;border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:middle;margin-right:6px}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;
+  background:linear-gradient(180deg,#EFF4FF 0%,#F5F7FA 55%,#F5F7FA 100%);
+  min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;
+}
+.page{width:100%;max-width:420px}
+.card{
+  background:#fff;border-radius:16px;padding:40px 36px;
+  box-shadow:0 8px 30px rgba(51,112,255,0.10),0 2px 8px rgba(31,56,99,0.06);
+  text-align:center;
+}
+.icon{
+  width:72px;height:72px;border-radius:50%;margin:0 auto 20px;
+  background:linear-gradient(135deg,#5B8CFF,#3370FF);
+  display:flex;align-items:center;justify-content:center;font-size:32px;
+  box-shadow:0 6px 16px rgba(51,112,255,0.35);
+}
+.status-ok{
+  width:72px;height:72px;border-radius:50%;margin:0 auto 20px;
+  background:#E8F5EC;color:#34A853;font-size:36px;
+  display:flex;align-items:center;justify-content:center;
+}
+h1{font-size:22px;font-weight:600;color:#1F2329;margin-bottom:8px}
+.sub{font-size:14px;color:#8F959E;margin-bottom:28px}
+.user-info{
+  display:flex;align-items:center;gap:12px;text-align:left;
+  background:#F5F7FA;border-radius:12px;padding:14px 16px;margin-bottom:24px;
+}
+.avatar{
+  width:40px;height:40px;border-radius:50%;background:#3370FF;color:#fff;
+  display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:500;flex-shrink:0;
+}
+.name{font-size:15px;font-weight:500;color:#1F2329}
+.dept{font-size:13px;color:#8F959E;margin-top:2px}
+.msg{font-size:14px;color:#5F6368;line-height:1.6;margin-bottom:24px}
+.btn{
+  width:100%;padding:12px 0;background:#3370FF;color:#fff;border:none;border-radius:8px;
+  font-size:15px;font-weight:500;cursor:pointer;
+  transition:background .2s;
+}
+.btn:hover{background:#1F5FE0}
+.btn:disabled{background:#A8C2FF;cursor:not-allowed}
+.btn.success{background:#34A853}
+.btn.success:hover{background:#2D934A}
+.tip{font-size:12px;color:#B0B7BF;margin-top:16px;line-height:1.5}
+.spinner{
+  display:inline-block;width:18px;height:18px;border:2px solid #D5E2FF;
+  border-top-color:#3370FF;border-radius:50%;
+  animation:spin .8s linear infinite;vertical-align:middle;margin-right:8px;
+}
 @keyframes spin{to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
-<div class="box" id="main-box">
-  <div class="icon">🔒</div>
-  <h1 id="title">暂无访问权限</h1>
-  <div class="user" id="user-info">加载中...</div>
-  <p id="msg-text">如需使用该功能，请提交申请。</p>
-  <button class="btn" id="btn-apply" onclick="apply()">申请访问权限</button>
+<div class="page">
+  <div class="card">
+    <div class="icon" id="card-icon">🔒</div>
+    <h1 id="title">暂无访问权限</h1>
+    <p class="sub" id="sub-text">当前账号未开通本应用访问权限</p>
+    <div class="user-info">
+      <div class="avatar" id="avatar">?</div>
+      <div>
+        <div class="name" id="user-name">—</div>
+        <div class="dept" id="user-dept">—</div>
+      </div>
+    </div>
+    <p class="msg" id="msg-text">如需使用该应用，请提交访问申请，管理员审批通过后即可正常使用。</p>
+    <button class="btn" id="btn-apply" onclick="apply()">申请访问权限</button>
+    <p class="tip" id="tip-text">提交后等待管理员审批，通过后自动进入应用</p>
+  </div>
 </div>
 <script>
 var params=new URLSearchParams(location.search);
-var userName=params.get('user')||'—';
+var userName=params.get('user')||'';
 var openId=params.get('openId')||'';
 var department=params.get('dept')||'';
-document.getElementById('user-info').innerHTML='<strong>'+userName+'</strong>'+(department?'<br>部门：'+department:'');
+document.getElementById('user-name').textContent=userName||'—';
+document.getElementById('user-dept').textContent=department||'—';
+document.getElementById('avatar').textContent=(userName||'?').charAt(0);
 
 async function apply(){
   var btn=document.getElementById('btn-apply');
@@ -40,21 +92,28 @@ async function apply(){
   try{
     var r=await fetch('/api/auth/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({openId:openId,userName:userName,department:department})});
     var d=await r.json();
-    if(d.ok && d.message.indexOf('已审批通过')>=0){
-      document.getElementById('title').textContent='已有权限';
-      document.getElementById('msg-text').textContent='即将跳转...';
-      document.getElementById('btn-apply').style.display='none';
-      setTimeout(function(){location.href='/'},1500);
-      return;
-    }
+    if(d.ok && d.message.indexOf('已审批通过')>=0){ success('已有权限'); return; }
     if(d.ok){
-      document.getElementById('btn-apply').className='btn success';btn.textContent='已提交申请';btn.disabled=true;
-      document.getElementById('msg-text').innerHTML='<span class="spinner"></span> 等待管理员审批...';
+      document.getElementById('sub-text').textContent='申请已提交';
+      document.getElementById('msg-text').innerHTML='<span class="spinner"></span> 等待管理员审批，通过后将自动进入...';
+      btn.textContent='已提交申请';btn.disabled=true;
+      document.getElementById('tip-text').textContent='请耐心等待，通常几分钟内完成审批';
       startPolling();
     }else{
       btn.disabled=false;btn.textContent='申请访问权限';
     }
   }catch(e){btn.disabled=false;btn.textContent='申请访问权限'}
+}
+
+function success(title){
+  document.getElementById('card-icon').className='status-ok';
+  document.getElementById('card-icon').textContent='✓';
+  document.getElementById('title').textContent=title||'审批已通过';
+  document.getElementById('sub-text').textContent='即将进入应用...';
+  document.getElementById('btn-apply').style.display='none';
+  document.getElementById('msg-text').textContent='';
+  document.getElementById('tip-text').textContent='';
+  setTimeout(function(){location.href='/'},1500);
 }
 
 function startPolling(){
@@ -63,13 +122,7 @@ function startPolling(){
       var r=await fetch('/api/auth/status?openId='+encodeURIComponent(openId));
       if(!r.ok) throw new Error();
       var d=await r.json();
-      if(d.approved){
-        document.getElementById('title').textContent='审批已通过';
-        document.getElementById('msg-text').textContent='即将跳转...';
-        document.getElementById('btn-apply').style.display='none';
-        setTimeout(function(){location.href='/'},1500);
-        return;
-      }
+      if(d.approved){ success(); return; }
     }catch(e){}
     setTimeout(poll,5000);
   },5000);

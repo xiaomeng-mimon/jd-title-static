@@ -91,8 +91,10 @@ header p { font-size: 16px; color: #8B7355; margin-top: 8px; }
 .loading-spinner p { font-size: 14px; color: #8B7355; }
 #hist-dropdown { position: absolute; background: #FFF; border: 1px solid #D4A574; border-radius: 8px; max-height: 200px; overflow-y: auto; z-index: 100; display: none; width: 100%; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
 #hist-dropdown.show { display: block; }
-#hist-dropdown .hist-item { padding: 8px 14px; cursor: pointer; font-size: 13px; color: #4A3728; }
+#hist-dropdown .hist-item { display: flex; align-items: center; gap: 10px; padding: 8px 14px; cursor: pointer; font-size: 13px; color: #4A3728; }
 #hist-dropdown .hist-item:hover { background: #FDF5EE; }
+#hist-dropdown .hist-item .hist-url { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#hist-dropdown .hist-item .hist-time { font-size: 11px; color: #B8A99A; white-space: nowrap; }
 #hist-dropdown .hist-clear { padding: 6px 14px; font-size: 12px; color: #C97C7C; cursor: pointer; border-top: 1px solid #E8D5C4; }
 .attr-bar { display: flex; align-items: center; margin-bottom: 8px; }
 .attr-bar .attr-name { width: 80px; font-size: 13px; text-align: right; padding-right: 10px; color: #4A3728; }
