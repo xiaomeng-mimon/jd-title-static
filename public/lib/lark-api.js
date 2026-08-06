@@ -96,16 +96,18 @@ async function parseWikiToken(wikiToken) {
 
 function parseBaseUrl(url) {
   url = url.trim();
+  const q = new URLSearchParams(url.includes('?') ? url.split('?')[1] : '');
+  const tableId = q.get('table') || '';
   const baseMatch = url.match(/\/base\/([a-zA-Z0-9]+)/);
-  if (baseMatch) return { type: 'base', token: baseMatch[1] };
+  if (baseMatch) return { type: 'base', token: baseMatch[1], tableId };
   const wikiMatch = url.match(/\/wiki\/([a-zA-Z0-9]+)/);
-  if (wikiMatch) return { type: 'wiki', token: wikiMatch[1] };
-  if (/^[a-zA-Z0-9]{20,}$/.test(url)) return { type: 'base', token: url };
+  if (wikiMatch) return { type: 'wiki', token: wikiMatch[1], tableId };
+  if (/^[a-zA-Z0-9]{20,}$/.test(url)) return { type: 'base', token: url, tableId: '' };
   throw new Error('无法解析 URL 格式');
 }
 
 async function resolveBaseToken(url) {
   const parsed = parseBaseUrl(url);
-  if (parsed.type === 'wiki') return await parseWikiToken(parsed.token);
-  return parsed.token;
+  const token = parsed.type === 'wiki' ? await parseWikiToken(parsed.token) : parsed.token;
+  return { token, tableId: parsed.tableId };
 }

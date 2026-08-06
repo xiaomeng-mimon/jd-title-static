@@ -193,9 +193,11 @@ async function handleDebugRecords() {
   debugEl.style.display = 'block';
   debugEl.textContent = '正在获取...';
   try {
-    const baseToken = await resolveBaseToken(baseUrl);
+    const resolved = await resolveBaseToken(baseUrl);
+    const baseToken = resolved.token;
     const tables = await getTableListWithInfo(baseToken);
-    let mainTable = tables.find(t => t.name.includes('数据') || t.name.includes('单品'));
+    let mainTable = resolved.tableId ? tables.find(t => t.id === resolved.tableId) : null;
+    if (!mainTable) mainTable = tables.find(t => t.name.includes('数据') || t.name.includes('单品'));
     if (!mainTable) mainTable = tables[0];
     const fields = await getFieldList(baseToken, mainTable.id);
     const fieldNames = fields.map(f => f.name).join('\n');
@@ -230,12 +232,14 @@ async function handleAnalyze() {
 
   try {
     // 1. 解析 URL 获取 baseToken
-    const baseToken = await resolveBaseToken(baseUrl);
+    const resolved = await resolveBaseToken(baseUrl);
+    const baseToken = resolved.token;
     addHistory(baseUrl);
 
-    // 2. 获取表列表
+    // 2. 获取表列表（链接里指定 table 则用它，否则自动选）
     const tables = await getTableListWithInfo(baseToken);
-    let mainTable = tables.find(t => t.name.includes('数据') || t.name.includes('单品'));
+    let mainTable = resolved.tableId ? tables.find(t => t.id === resolved.tableId) : null;
+    if (!mainTable) mainTable = tables.find(t => t.name.includes('数据') || t.name.includes('单品'));
     if (!mainTable) mainTable = tables[0];
 
     // 3. 获取字段
