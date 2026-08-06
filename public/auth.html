@@ -5,7 +5,10 @@
 (async function(){
   var p=new URLSearchParams(location.search), code=p.get('code');
   if(!code){
-    location.href='https://open.feishu.cn/open-apis/authen/v1/authorize?app_id=cli_aae72d734df8dcbb&redirect_uri='+encodeURIComponent(location.origin+'/auth.html');
+    var cfg = {};
+    try { cfg = await (await fetch('/api/config')).json(); } catch(e) {}
+    var appId = cfg.app_id || '';
+    location.href='https://open.feishu.cn/open-apis/authen/v1/authorize?app_id='+appId+'&redirect_uri='+encodeURIComponent(location.origin+'/auth.html');
     return;
   }
   try{
