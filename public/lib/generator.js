@@ -68,7 +68,7 @@ const SYSTEM_PROMPT = `(输出JSON)\n【角色设定】
 - 摒弃无效营销词：严禁使用"绝绝子、yyds、闭眼入、仙女必备"等浮夸词汇
 
 【字数要求】
-每条标题严格控制在25字以内（包含标点符号、数字、emoji等所有字符）。请逐字数清楚。
+每条标题严格控制在5-25字以内（包含标点符号、数字、emoji等所有字符），不要超过25字。请逐字数清楚。
 
 【输出结构要求】
 请从以下三种京东高转化结构中生成30条标题（A结构9条、B结构12条、C结构9条），每条都要不同，不要重复：
@@ -171,7 +171,7 @@ function buildUserMessage(product, analysis) {
     }
   }
 
-  parts.push('\n请根据以上信息，按照System Prompt中的参数转化三步法和三种结构要求，生成30条京东逛逛种草标题。每条标题严格控制在25字以内（含标点数字）。');
+  parts.push('\n请根据以上信息，按照System Prompt中的参数转化三步法和三种结构要求，生成30条京东逛逛种草标题。每条标题严格控制在5-25字以内（含标点数字），不要超过25字。');
 
   return parts.join('\n');
 }
@@ -192,7 +192,7 @@ function validateTitle(title) {
   if (KNOWN_BRANDS.some(b => title.includes(b))) return false;
   if (FORBIDDEN_TERMS.some(t => title.includes(t))) return false;
   const cleanLen = title.replace(/[\s]/g, '').length;
-  if (cleanLen < 8 || cleanLen > 27) return false;
+  if (cleanLen < 5 || cleanLen > 27) return false;
   return true;
 }
 
@@ -289,7 +289,7 @@ async function generateAll(analysis, userInput) {
         valid.filter(function(t){return t.structure==='C'}).slice(0,3)
       );
       var titles = picked.map(function(t){ return { title: t.title, structure: t.structure, words: t.words, reasoning: '结构'+t.structure+' · LLM生成' }; });
-      var strategy = '大模型生成（'+LLM_CONFIG.model+'）\n  · 品类热搜词：'+getCategoryKW(product.name)+'\n  · 生成规则：A避坑防御(3条) / B效率提升(4条) / C痛点反转(3条)\n  · 字数限制：27字内（含标点数字）\n  · 禁止品牌词 + 禁止浮夸词 + 参数事实合规';
+      var strategy = '大模型生成（'+LLM_CONFIG.model+'）\n  · 品类热搜词：'+getCategoryKW(product.name)+'\n  · 生成规则：A避坑防御(3条) / B效率提升(4条) / C痛点反转(3条)\n  · 字数限制：5-25字内（含标点数字）\n  · 禁止品牌词 + 禁止浮夸词 + 参数事实合规';
       return { model: model, result: { product: product, titles: titles, strategy: strategy } };
     }).catch(function(e) {
       return { model: model, result: { product: product, titles: [], strategy: '', error: e.message } };
